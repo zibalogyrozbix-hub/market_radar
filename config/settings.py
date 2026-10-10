@@ -40,14 +40,22 @@ def load_config(path: str | os.PathLike | None = None) -> Dict[str, Any]:
     return cfg
 
 
+def _clean(v: str | None) -> str | None:
+    """Secrets pasted into GitHub/.env often carry a trailing newline/space or wrapping quotes."""
+    if v is None:
+        return None
+    v = v.strip().strip('"').strip("'").strip()
+    return v or None
+
+
 def get_secrets() -> Dict[str, str | None]:
     """Secrets come only from the environment, never from config.yaml."""
     return {
-        "telegram_token": os.getenv("TELEGRAM_BOT_TOKEN"),
+        "telegram_token": _clean(os.getenv("TELEGRAM_BOT_TOKEN")),
         "telegram_channel": os.getenv("TELEGRAM_CHANNEL_ID"),
-        "twelvedata_api_key": os.getenv("TWELVEDATA_API_KEY"),
+        "twelvedata_api_key": _clean(os.getenv("TWELVEDATA_API_KEY")),
         "turso_database_url": os.getenv("TURSO_DATABASE_URL"),
-        "turso_auth_token": os.getenv("TURSO_AUTH_TOKEN"),
+        "turso_auth_token": _clean(os.getenv("TURSO_AUTH_TOKEN")),
         "mt5_login": os.getenv("MT5_LOGIN"),
         "mt5_password": os.getenv("MT5_PASSWORD"),
         "mt5_server": os.getenv("MT5_SERVER"),
