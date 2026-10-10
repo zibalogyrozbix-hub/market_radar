@@ -75,6 +75,9 @@ def _check_data(cfg: dict, pipe, db, symbols) -> int:
     tf = (cfg["timeframes"] or ["H1"])[0]
     bad = 0
     for sym in syms:
+        if getattr(pipe.loader.provider, "auth_error", None):
+            print(f"STOP: {pipe.loader.provider.auth_error}")
+            return 1
         df, rep = pipe.loader.get(sym, tf)
         mark = "" if is_market_open(sym, cfg) else " (market closed now)"
         if df is None:
