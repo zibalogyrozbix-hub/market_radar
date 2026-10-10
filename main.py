@@ -8,6 +8,7 @@
   python main.py --publish                        retry pending Telegram posts
   python main.py --summary                        publish the daily summary
   python main.py --daemon                         run continuously
+  python main.py --test-post [TYPE] [--symbol X]  send one sample post to the channel right now (no DB writes)
   python main.py --check-data                     test the data provider + database connection (uses ~1 credit/symbol)
 """
 from __future__ import annotations
@@ -34,6 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--summary", action="store_true", help="publish the daily summary")
     g.add_argument("--daemon", action="store_true", help="run continuously")
     g.add_argument("--check-data", action="store_true", help="test data provider and database, then exit")
+    g.add_argument("--test-post", nargs="?", const="MARKET_SCAN", metavar="TYPE",
+                   help="send ONE sample post now (types: MARKET_SCAN ANOMALY_ALERT HISTORICAL_MATCH REGIME_CHANGE "
+                        "CROSS_MARKET_BREAK VOLATILITY_ALERT DAILY_MARKET_SUMMARY MODEL_UPDATE); use --symbol to pick the market"),
     p.add_argument("--symbol", help="restrict to one symbol, e.g. XAUUSD")
     p.add_argument("--timeframe", help="restrict to one timeframe, e.g. H1")
     p.add_argument("--no-publish", action="store_true", help="analyse only; do not post")
@@ -117,6 +121,13 @@ def main(argv=None) -> int:
     symbols = [args.symbol.upper()] if args.symbol else None
     tfs = [args.timeframe.upper()] if args.timeframe else None
 
+    if args.test_post:
+        if not pipe.publisher.configured:
+            print("Telegram is not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHANNEL_ID)")
+            return 1
+        ok = pipe.publish_test(args.test_post, symbols[0] if symbols else None, tfs[0] if tfs else None)
+        print("test post sent" if ok else "test post NOT sent (see log)")
+        return 0 if ok else 1
     if args.check_data:
         return _check_data(cfg, pipe, db, symbols)
     if args.train:
