@@ -1,0 +1,64 @@
+# Triggered from cron-job.org through the GitHub API (workflow_dispatch) - GitHub's own `schedule:` is NOT used
+# because it is often delayed by 5-30+ minutes. State lives in Turso (events, predictions, models), so every
+# run can be a fresh, stateless runner. See docs/SETUP_FA.md for the cron-job.org request to copy.
+name: radar
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "What to run"
+        type: choice
+        options: [scan, summary, train, evaluate, check-data]
+        default: scan
+      symbol:
+        description: "Optional: one symbol only (e.g. EURGBP)"
+        type: string
+        required: false
+        default: ""
+
+# one run at a time: overlapping runs would fight over the Twelve Data rate limit
+concurrency:
+  group: radar
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+      TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      DATA_PROVIDER: twelvedata
+      REQUIRE_DB: "1"            # abort instead of running without the database (would re-post old events)
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-turso.txt
+      - run: pip install -r requirements.txt -r requirements-turso.txt
+      - name: Run job
+        env:
+          JOB: ${{ inputs.job || 'scan' }}
+          SYMBOL: ${{ inputs.symbol }}
+        run: |
+          ARGS=""
+          if [ -n "$SYMBOL" ]; then ARGS="--symbol $SYMBOL"; fi
+          case "$JOB" in
+            scan)       python main.py --scan $ARGS ;;
+            summary)    python main.py --summary ;;
+            train)      python main.py --train $ARGS && python main.py --evaluate ;;
+            evaluate)   python main.py --evaluate ;;
+            check-data) python main.py --check-data $ARGS ;;
+            *)          echo "unknown job: $JOB"; exit 2 ;;
+          esac
