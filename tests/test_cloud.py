@@ -106,6 +106,22 @@ def test_twelvedata_stale_guard_and_session_exemption():
     assert len(closed) == 5  # market closed (weekend): old candles are expected, e.g. for the weekly train job
 
 
+def test_twelvedata_bad_key_fails_fast_and_key_is_cleaned():
+    http = FakeHTTP([{"status": "error", "code": 401, "message": "**apikey** parameter is incorrect or not specified."}])
+    p = _prov(http)
+    p.api_key = " \"abc123\"\n".strip().strip('"')
+    for _ in range(3):
+        try:
+            p.fetch("EURUSD", "H1", 5)
+            raise AssertionError("expected TwelveDataError")
+        except TwelveDataError as exc:
+            assert "TWELVEDATA_API_KEY" in str(exc)
+    assert len(http.calls) == 1, "after the first 401 no further requests may be sent"
+    assert TwelveDataProvider(' "k1"\n', http=http).api_key == "k1"
+    from config.settings import _clean
+    assert _clean("  'tok'\n") == "tok" and _clean("  \n") is None
+
+
 def test_market_hours():
     c = {"market_hours": {"always_open": ["BTCUSD"], "session_only": ["US500"]}}
     utc = lambda s: datetime.fromisoformat(s).replace(tzinfo=timezone.utc)  # noqa: E731
