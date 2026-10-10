@@ -1,0 +1,2 @@
+# Turso (libSQL) database driver. Installed by the GitHub Actions workflow; optional for local runs (SQLite).
+sqlalchemy-libsql>=0.1.0

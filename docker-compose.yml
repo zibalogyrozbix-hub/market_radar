@@ -1,0 +1,11 @@
+services:
+  radar:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_PROVIDER: ${DATA_PROVIDER:-twelvedata}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: ["python", "main.py", "--daemon"]
