@@ -118,7 +118,8 @@ class TwelveDataProvider(DataProvider):
 
         if not api_key:
             raise RuntimeError("TWELVEDATA_API_KEY is not set")
-        self.api_key = api_key
+        self.api_key = api_key.strip().strip('"').strip("'").strip()
+        self.auth_error: Optional[str] = None  # set after a 401/403: every further request would fail too
         self.symbol_map = dict(symbol_map or {})
         self.rpm = max(1, int(requests_per_minute))
         self.max_retries = max(1, int(max_retries))
@@ -156,6 +157,8 @@ class TwelveDataProvider(DataProvider):
         self._calls.append(self._clock())
 
     def _request(self, params: dict) -> dict:
+        if self.auth_error:  # do not burn requests / wait on the rate limit when the key is known to be bad
+            raise TwelveDataError(self.auth_error, retryable=False)
         last = "unknown error"
         for attempt in range(1, self.max_retries + 1):
             self._throttle()
@@ -176,6 +179,10 @@ class TwelveDataProvider(DataProvider):
                     self._sleep(61)
                     self._calls.clear()
                     continue
+                if code in (401, 403) and "apikey" in msg.lower().replace(" ", "") or code == 401:
+                    self.auth_error = (f"Twelve Data {code}: API key rejected. Check the TWELVEDATA_API_KEY secret "
+                                       f"(no spaces/quotes, key from twelvedata.com/account/api-keys). Server said: {msg[:120]}")
+                    raise TwelveDataError(self.auth_error, retryable=False)
                 raise TwelveDataError(f"Twelve Data {code}: {msg}", retryable=False)
             if resp.status_code >= 500:
                 last = f"HTTP {resp.status_code}"
