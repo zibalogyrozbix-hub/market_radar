@@ -28,7 +28,6 @@ symbols:
   - AUDNZD
   - CADJPY
   - XAUUSD
-  - XAGUSD
   - BTCUSD
   - US500
   - NAS100
@@ -36,14 +35,13 @@ symbols:
 # Twelve Data (free Basic plan: 8 credits/min, 800/day; 1 credit per symbol per request).
 # Forex pairs and BTC are auto-mapped (EURUSD -> EUR/USD). The Basic plan covers forex, crypto and US
 # equities/ETFs but NOT indices: US500/NAS100 therefore use the SPY/QQQ ETFs as proxies (hourly bars only
-# during US sessions). Use `python main.py --check-data` to test every symbol with your key.
+# during US sessions). XAG/USD (silver) needs a paid plan (404 on Basic) and was removed. Use `python main.py --check-data` to test every symbol with your key.
 twelvedata:
   requests_per_minute: 8      # sliding-window limiter (free plan = 8)
   max_retries: 3
   max_stale_minutes: 240      # newest closed candle older than this => symbol skipped (holiday/API issue)
   symbol_map:
     XAUUSD: "XAU/USD"
-    XAGUSD: "XAG/USD"
     BTCUSD: "BTC/USD"
     US500: "SPY"
     NAS100: "QQQ"
@@ -71,7 +69,6 @@ display_names:
   EURAUD: "EUR/AUD"
   AUDNZD: "AUD/NZD"
   CADJPY: "CAD/JPY"
-  XAGUSD: "XAG/USD"
   BTCUSD: "BTC/USD"
 
 prediction:
