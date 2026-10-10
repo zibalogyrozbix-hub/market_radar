@@ -364,6 +364,53 @@ class RadarPipeline:
                 log.error("could not update post status: %s", exc)
         return ok
 
+    TEST_LABEL = "🧪 TEST POST — real format and live data, not a market event\n\n"
+
+    def publish_test(self, post_type: str = "MARKET_SCAN", symbol: Optional[str] = None,
+                     timeframe: Optional[str] = None) -> bool:
+        """Send one sample post of `post_type` right now, bypassing priority/cooldown/dedupe, so the channel
+        output can be checked without waiting for a real event. Nothing is written to the database."""
+        from publishing.post_generator import _BUILDERS
+
+        post_type = post_type.upper()
+        if post_type not in _BUILDERS:
+            raise ValueError(f"unknown post type {post_type}; choose one of: {', '.join(sorted(_BUILDERS))}")
+        tf = (timeframe or self.cfg["timeframes"][0]).upper()
+        saved_db, self.db = self.db, None  # analysis must not store predictions/candles for a test
+        try:
+            if post_type == "DAILY_MARKET_SUMMARY":
+                data = summarize([r for r in (self.analyze_symbol(s, tf) for s in self.scannable_symbols()[:6]) if r]
+                                 if saved_db is None else [])
+                if saved_db is not None:
+                    self.db = saved_db
+                    data = self.build_summary()
+                    self.db = None
+                if not data["markets_scanned"]:
+                    data = summarize([r for r in (self.analyze_symbol(s, tf) for s in self.scannable_symbols()[:6]) if r])
+            elif post_type == "MODEL_UPDATE":
+                sym = (symbol or self.cfg["symbols"][0]).upper()
+                meta = self.registry.meta(sym, tf, self.registry.active_version(sym, tf) or "") or {}
+                data = {"symbol": sym, "timeframe": tf, "version": self.registry.active_version(sym, tf) or "ML_v001",
+                        "activated": True, "summary": meta.get("summary") or {}}
+            else:
+                sym = (symbol or self.cfg["symbols"][0]).upper()
+                data = self.analyze_symbol(sym, tf)
+                if not data:
+                    raise RuntimeError(f"no valid data for {sym} {tf}")
+        finally:
+            self.db = saved_db
+        text = self.TEST_LABEL + generate_post(post_type, data, self.cfg)
+        image_path = None
+        if self.cfg["publishing"].get("send_images", True):
+            try:
+                image_path = str(render_summary(data, self.cfg) if post_type == "DAILY_MARKET_SUMMARY"
+                                 else render_card(data, post_type, self.cfg))
+            except Exception as exc:
+                log.warning("image generation failed (text-only test post): %s", exc)
+        ok, err = self.publisher.publish(text, image_path)
+        log.info("Test post %s %s: %s", post_type, data.get("symbol", ""), "sent" if ok else f"NOT sent ({err})")
+        return ok
+
     def flush_pending(self) -> int:
         """Retry posts that could not be delivered earlier."""
         if self.db is None or not self.publisher.configured:
