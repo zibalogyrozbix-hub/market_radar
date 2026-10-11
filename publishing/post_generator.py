@@ -17,8 +17,10 @@ FORBIDDEN = ["BUY NOW", "SELL NOW", "GUARANTEED", "PROFIT SIGNAL", "100% ACCURAT
 
 DEFAULT_GUIDE_URL = "https://telegra.ph/FXSCAN--User-Guide-10-10"
 # Telegraph builds heading anchors from the heading text (spaces -> "-"); keep the guide headings in sync.
-ANCHORS = {"probability": "Probability", "edge": "Statistical-edge", "risk": "Risk", "agreement": "Model-agreement",
-           "similarity": "Similarity", "state": "Market-states", "usage": "Using-it-in-your-trading"}
+# Each target heading is preceded by a small "Section ..." marker heading so the scroll lands just above the real title.
+ANCHORS = {"probability": "Section-Probability", "edge": "Section-Statistical-edge", "risk": "Section-Risk",
+           "agreement": "Section-Model-agreement", "similarity": "Section-Similarity", "state": "Section-Market-states",
+           "usage": "Section-Using-it-in-your-trading"}
 DEFAULT_DISCLAIMER = "Statistical analysis · not financial advice"
 BUTTON_LABEL = "🧭 How do I use this?"
 
