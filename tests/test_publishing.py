@@ -47,18 +47,56 @@ def test_all_post_types_generate_without_signal_language():
 
 
 def test_market_scan_content_and_no_clear_edge_wording():
+    from publishing.post_generator import strip_html, visible_length
     text = generate_post("MARKET_SCAN", BASE, cfg())
-    for s in ("AI MARKET SCAN", "XAU/USD · H1", "TREND        81/100", "74%", "+0.28%", "Risk", "Model Agreement"):
-        assert s in text
+    plain = strip_html(text)
+    for s in ("XAU/USD", "Volatility expansion", "TREND", "▰", "MKT SCORE", "74%", "+0.28%", "Risk MEDIUM",
+              "Agreement HIGH", "500", "71%", "not financial advice", "#XAUUSD #MarketScan #Expansion", "candle 12:00 UTC"):
+        assert s in plain, s
+    assert "↗" in plain and "baseline 🔥" in plain  # calibrated 23 pp edge is highlighted
+    assert 'href="https://telegra.ph/FXSCAN--User-Guide-10-10#Probability"' in text
+    assert visible_length(text) <= 1000
     ne = generate_post("MARKET_SCAN", r(edge_label="NO CLEAR EDGE", edge=0.01), cfg())
-    assert "NO CLEAR EDGE" in ne and "74%" not in ne
+    assert "none clear" in ne and "74%" in ne  # values stay visible, no hard gating
 
 
 def test_raw_probability_is_labelled_and_na_is_shown():
     raw = generate_post("MARKET_SCAN", r(probability_kind="raw model probability"), cfg())
-    assert "raw model probability" in raw
+    assert "(raw model)" in raw and "baseline 🔥" not in raw and "✅" not in raw
     na = generate_post("MARKET_SCAN", r(similarity_score=None, similar_states=None, historical_up_rate=None), cfg())
-    assert "SIMILARITY   N/A" in na and "Similar Historical States\nN/A" in na
+    assert "▱▱▱▱▱▱▱▱▱▱ N/A" in na and "Similar past situations: N/A" in na
+
+
+def test_track_record_and_methods_lines_and_html_escape():
+    from publishing.post_generator import strip_html
+    t = strip_html(generate_post("MARKET_SCAN", r(track_record={"n": 37, "brier": 0.2}), cfg()))
+    assert "building (37/100)" in t
+    t = strip_html(generate_post("MARKET_SCAN", r(track_record={"n": 150, "brier": 0.231},
+                                                   methods_info={"models": ["logistic", "xgboost"], "calibration": "isotonic"}), cfg()))
+    assert "Brier 0.231" in t and "Logistic + XGBoost" in t and "isotonic calibration" in t
+    assert "&lt;" in generate_post("ANOMALY_ALERT", r(why=["a<b"]), cfg())
+
+
+def test_every_type_fits_caption_and_has_hashtags():
+    from publishing.post_generator import visible_length
+    for t in ("MARKET_SCAN", "ANOMALY_ALERT", "HISTORICAL_MATCH", "REGIME_CHANGE", "CROSS_MARKET_BREAK", "VOLATILITY_ALERT"):
+        x = generate_post(t, BASE, cfg())
+        assert visible_length(x) <= 1024 and "#XAUUSD" in x, t
+
+
+def test_telegram_html_button_and_plain_fallback():
+    from publishing.telegram import _plain
+    pl = build_message_payload("@c", "<b>x</b>", "HTML", ("🧭 How do I use this?", "https://t.me/x"))
+    assert pl["parse_mode"] == "HTML" and "inline_keyboard" in pl["reply_markup"]
+    assert _plain("<b>a &amp; b</b>") == "a & b"
+    calls = []
+
+    class H:
+        def post(self, url, data=None, files=None, timeout=None):
+            calls.append(data)
+            return FakeResp(400, {"description": "Bad Request: can't parse entities"}) if len(calls) == 1 else FakeResp(200, {})
+    ok, _ = TelegramPublisher("T", "@c", http=H(), sleep=lambda s: None, parse_mode="HTML").publish("<b>x</b>")
+    assert ok and calls[1].get("parse_mode") is None and calls[1]["text"] == "x"
 
 
 def test_priority_threshold_dedupe_and_cooldown():
