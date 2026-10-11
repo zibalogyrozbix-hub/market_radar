@@ -21,7 +21,7 @@ from features.builder import FEATURE_COLUMNS, build_features, make_targets
 from models import ensemble as ens
 from publishing import priority as prio
 from publishing.image_generator import render_card, render_summary
-from publishing.post_generator import generate_post
+from publishing.post_generator import BUTTON_LABEL, generate_post, guide_usage_url
 from publishing.telegram import TelegramPublisher
 from scoring import scorer
 from training.model_registry import ModelRegistry
@@ -47,7 +47,8 @@ class RadarPipeline:
         tcfg = cfg.get("telegram", {})
         self.publisher = publisher or TelegramPublisher(
             sec["telegram_token"] if tcfg.get("enabled", True) else None, sec["telegram_channel"],
-            retries=int(tcfg.get("retries", 3)), timeout=int(tcfg.get("timeout", 20)))
+            retries=int(tcfg.get("retries", 3)), timeout=int(tcfg.get("timeout", 20)),
+            parse_mode="HTML", button=(BUTTON_LABEL, guide_usage_url(cfg)) if cfg.get("publishing", {}).get("guide_button", True) else None)
         self.last_results: List[Dict[str, Any]] = []
         self._sent_hashes: set = set()  # in-process memory when no DB is available
 
@@ -325,8 +326,28 @@ class RadarPipeline:
                 log.exception("publishing failed for %s %s: %s", ev["symbol"], ev["type"], exc)
         return sent
 
+    def _enrich(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Add run-state facts used by the post text: models/calibration actually in use, live track record."""
+        try:
+            sym, tf = data.get("symbol"), data.get("timeframe")
+            if sym and tf and "methods_info" not in data:
+                meta = self.registry.meta(sym, tf, self.registry.active_version(sym, tf) or "") or {}
+                data["methods_info"] = {"models": meta.get("models") or [], "calibration": meta.get("calibration_method"),
+                                        "isolation_forest": self.cfg.get("anomaly", {}).get("use_isolation_forest", True)}
+            if self.db is not None and "track_record" not in data and data.get("symbol"):
+                from database import repository as repo
+                with self.db.session() as s:
+                    df = repo.resolved_predictions_df(s, limit=1000)
+                    df = df.dropna(subset=["probability_up"]) if len(df) else df
+                    if len(df):
+                        data["track_record"] = {"n": int(len(df)),
+                                                "brier": float(((df["probability_up"] - df["y"]) ** 2).mean())}
+        except Exception as exc:
+            log.debug("post enrichment skipped: %s", exc)
+        return data
+
     def _publish_one(self, post_type: str, data: Dict[str, Any], ev: Optional[Dict[str, Any]] = None) -> bool:
-        text = generate_post(post_type, data, self.cfg)
+        text = generate_post(post_type, self._enrich(data), self.cfg)
         image_path = None
         if self.cfg["publishing"].get("send_images", True):
             try:
@@ -399,7 +420,7 @@ class RadarPipeline:
                     raise RuntimeError(f"no valid data for {sym} {tf}")
         finally:
             self.db = saved_db
-        text = self.TEST_LABEL + generate_post(post_type, data, self.cfg)
+        text = self.TEST_LABEL + generate_post(post_type, self._enrich(data), self.cfg)
         image_path = None
         if self.cfg["publishing"].get("send_images", True):
             try:
