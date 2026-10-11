@@ -1,0 +1,29 @@
+📌 START HERE — How to read AI Market Radar
+
+This channel posts statistical market analysis on closed 1-hour candles. It is NOT a signal service: no BUY/SELL, no entries, no targets.
+
+1️⃣ SCORES (0–100)
+TREND = how strong the trend is (not its direction)
+MOMENTUM = how strong the current push is
+VOLATILITY = percentile vs. its own history (90 = very high)
+ANOMALY = how unusual the candle is (80+ = alert)
+SIMILARITY = how well history represents this state
+MARKET INTELLIGENCE SCORE = how notable the situation is — not bullish/bearish
+
+2️⃣ MARKET STATE
+📈 TREND_UP · 📉 TREND_DOWN · ↔️ RANGE · 🧊 COMPRESSION · 🔥 EXPANSION · ⚡ BREAKOUT · 🔄 REVERSAL · 🌪️ HIGH_VOL · 😴 LOW_VOL
+
+3️⃣ PROBABILITY & EDGE
+Probability ↑ = chance price is higher 4 candles (4h) later. Below 50% = lean down.
+Edge = advantage vs. the long-run base rate (pp). Under 5 pp → "Statistical edge: none clear" (most posts — and that's honest).
+"raw model probability" = not yet calibrated.
+
+4️⃣ RISK: LOW · MEDIUM · HIGH · EXTREME
+Use it to size positions, not to pick direction.
+
+5️⃣ HOW TO USE IT
+Regime → Risk → Edge → History → your own chart and plan. Treat it as context, never as a trigger. Costs can exceed a small edge.
+
+No post ≠ calm market. Posts are a few minutes after each candle closes.
+
+⚠️ Statistical analysis only. Not financial advice. Trading involves a high risk of loss.
