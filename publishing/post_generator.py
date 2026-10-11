@@ -181,8 +181,7 @@ def _edge_lines(r, link) -> List[str]:
     hz = _horizon(r)
     if p is None:
         return [f"{link('probability', 'Probability')} ↑ over {hz}: N/A"]
-    lines = [f"{link('probability', 'Probability')} ↑ over {hz}: <b>{p * 100:.0f}%</b>" + (" (raw model)" if raw else ""),
-             f"Expected move: {_pct(r.get('expected_return'))}"]
+    lines = [f"{link('probability', 'Probability')} ↑ over {hz}: <b>{p * 100:.0f}%</b>" + (" (raw model)" if raw else "")]
     edge = r.get("edge")
     if r.get("edge_label") == "NO CLEAR EDGE":
         lines.append(f"{link('edge', 'Statistical edge')}: none clear" + (f" ({edge * 100:+.1f} pp)" if edge is not None else ""))
@@ -191,13 +190,14 @@ def _edge_lines(r, link) -> List[str]:
     else:
         mark = "" if raw else (" 🔥" if edge * 100 >= 10 else " ✅" if edge * 100 >= 5 else "")
         lines.append(f"{link('edge', 'Statistical edge')}: {edge * 100:+.1f} pp vs baseline{mark}")
+    lines.append(f"<blockquote>Expected move: {_pct(r.get('expected_return'))}</blockquote>")  # quoted for visibility
     return lines
 
 
 def _risk_line(r, link) -> str:
     rk, ag = r.get("risk"), r.get("model_agreement")
-    return (f"{_LIGHT.get(rk, '⚪')} {link('risk', 'Risk')} {_e(rk or 'N/A')} · "
-            f"{_AGREE.get(ag, '⚪')} {link('agreement', 'Agreement')} {_e(ag or 'N/A')}")
+    return (f"{_LIGHT.get(rk, '⚪')} {link('risk', 'Risk')} {_e(rk or 'N/A')}\n"
+            f"{_AGREE.get(ag, '⚪')} {link('agreement', 'Model Agreement')} {_e(ag or 'N/A')}")
 
 
 def _history_line(r, link) -> str:
