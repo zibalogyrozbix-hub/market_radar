@@ -51,10 +51,10 @@ def test_market_scan_content_and_no_clear_edge_wording():
     text = generate_post("MARKET_SCAN", BASE, cfg())
     plain = strip_html(text)
     for s in ("XAU/USD", "Volatility expansion", "TREND", "▰", "MKT SCORE", "74%", "+0.28%", "Risk MEDIUM",
-              "Agreement HIGH", "500", "71%", "not financial advice", "#XAUUSD #MarketScan #Expansion", "candle 12:00 UTC"):
+              "Model Agreement HIGH", "500", "71%", "not financial advice", "#XAUUSD #MarketScan #Expansion", "candle 12:00 UTC"):
         assert s in plain, s
     assert "↗" in plain and "baseline 🔥" in plain  # calibrated 23 pp edge is highlighted
-    assert 'href="https://telegra.ph/FXSCAN--User-Guide-10-10#Probability"' in text
+    assert 'href="https://telegra.ph/FXSCAN--User-Guide-10-10#Section-Probability"' in text
     assert visible_length(text) <= 1000
     ne = generate_post("MARKET_SCAN", r(edge_label="NO CLEAR EDGE", edge=0.01), cfg())
     assert "none clear" in ne and "74%" in ne  # values stay visible, no hard gating
