@@ -165,7 +165,10 @@ publishing:
     VOLATILITY_ALERT: 90
     DAILY_MARKET_SUMMARY: 1200
     MODEL_UPDATE: 600
-  disclaimer: "Statistical market analysis. Not a trading signal or financial advice."
+  disclaimer: "Statistical analysis · not financial advice"
+  guide_url: "https://telegra.ph/FXSCAN--User-Guide-10-10"
+  guide_button: true
+  link_labels: true
 
 telegram:
   enabled: true
