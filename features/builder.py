@@ -38,7 +38,7 @@ PRETTY = {
 Z_COLUMNS = ["z_ret", "z_vol", "z_tickvol", "z_spread", "z_velocity"]
 
 
-def build_features(candles: pd.DataFrame, z_window: int = 100) -> pd.DataFrame:
+def build_features(candles: pd.DataFrame, z_window: int = 100, donchian_window: int = 20) -> pd.DataFrame:
     """Return frame indexed by timestamp with base columns, helper columns and FEATURE_COLUMNS."""
     df = candles.copy()
     df = df.set_index("timestamp") if "timestamp" in df.columns else df
@@ -81,8 +81,9 @@ def build_features(candles: pd.DataFrame, z_window: int = 100) -> pd.DataFrame:
     hh = np.sign(hi20 - hi20.shift(20))  # +1 higher high, -1 lower high
     hl = np.sign(lo20 - lo20.shift(20))  # +1 higher low, -1 lower low
     out["structure"] = (hh + hl) / 2.0
-    out["donch_up"] = (c > h.rolling(20, min_periods=20).max().shift(1)).astype(float)
-    out["donch_dn"] = (c < l.rolling(20, min_periods=20).min().shift(1)).astype(float)
+    dw = max(5, int(donchian_window))  # regime.donchian_window in config.yaml
+    out["donch_up"] = (c > h.rolling(dw, min_periods=dw).max().shift(1)).astype(float)
+    out["donch_dn"] = (c < l.rolling(dw, min_periods=dw).min().shift(1)).astype(float)
 
     # RSI divergence: price higher-high vs RSI lower; price lower-low vs RSI higher (20-bar compare)
     px_hi = (c >= c.rolling(20, min_periods=20).max()) & (out["rsi"] < out["rsi"].shift(20) - 3)
