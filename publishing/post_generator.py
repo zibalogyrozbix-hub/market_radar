@@ -69,6 +69,12 @@ def _pct(v, signed=True, digits=2, na="N/A"):
     return f"{v * 100:+.{digits}f}%" if signed else f"{v * 100:.{digits}f}%"
 
 
+def _move(v) -> str:
+    if v is None:
+        return "N/A"
+    return "≈0.00%" if abs(v) * 100 < 0.005 else f"{v * 100:+.2f}%"
+
+
 def _score(v) -> str:
     return "N/A" if v is None else f"{v:.0f}/100"
 
@@ -175,22 +181,27 @@ def _state_block(r, cfg, link) -> str:
 
 
 def _edge_lines(r, link) -> List[str]:
-    """Probability / expected move / edge. Always shown; the edge is only highlighted when it is calibrated."""
+    """Probability / edge / expected move. Always shown; the edge is only highlighted when it is calibrated
+    and the model has shown measurable skill."""
     p = r.get("probability_up")
     raw = r.get("probability_kind") != "calibrated"
+    skill = r.get("model_skill")
+    noskill = skill is None or skill <= 0
     hz = _horizon(r)
     if p is None:
         return [f"{link('probability', 'Probability')} ↑ over {hz}: N/A"]
-    lines = [f"{link('probability', 'Probability')} ↑ over {hz}: <b>{p * 100:.0f}%</b>" + (" (raw model)" if raw else "")]
+    tags = (["raw model"] if raw else []) + (["no proven skill"] if noskill else [])
+    lines = [f"{link('probability', 'Probability')} ↑ over {hz}: <b>{p * 100:.0f}%</b>" + (f" ({' · '.join(tags)})" if tags else "")]
     edge = r.get("edge")
+    side = "↓" if p < 0.5 else "↑"
     if r.get("edge_label") == "NO CLEAR EDGE":
         lines.append(f"{link('edge', 'Statistical edge')}: none clear" + (f" ({edge * 100:+.1f} pp)" if edge is not None else ""))
     elif edge is None or r.get("edge_label") == "N/A":
         lines.append(f"{link('edge', 'Statistical edge')}: N/A")
     else:
-        mark = "" if raw else (" 🔥" if edge * 100 >= 10 else " ✅" if edge * 100 >= 5 else "")
-        lines.append(f"{link('edge', 'Statistical edge')}: {edge * 100:+.1f} pp vs baseline{mark}")
-    lines.append(f"<blockquote>Expected move: {_pct(r.get('expected_return'))}</blockquote>")  # quoted for visibility
+        mark = "" if (raw or noskill) else (" 🔥" if edge * 100 >= 10 else " ✅" if edge * 100 >= 5 else "")
+        lines.append(f"{link('edge', 'Statistical edge')}: {edge * 100:+.1f} pp toward {side} vs baseline{mark}")
+    lines.append(f"<blockquote>Expected move: {_move(r.get('expected_return'))}</blockquote>")  # quoted for visibility
     return lines
 
 
