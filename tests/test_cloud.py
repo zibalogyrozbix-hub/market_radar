@@ -122,17 +122,52 @@ def test_twelvedata_bad_key_fails_fast_and_key_is_cleaned():
     assert _clean("  'tok'\n") == "tok" and _clean("  \n") is None
 
 
+def test_publish_test_sends_every_post_type_without_db_writes():
+    from data.loader import MarketDataLoader
+    from data.providers import SyntheticProvider
+    from pipeline import RadarPipeline
+    from publishing.post_generator import _BUILDERS
+    from publishing.telegram import TelegramPublisher
+    from tests.helpers import END, cfg as _cfg
+    from training.model_registry import ModelRegistry
+
+    c = dict(_cfg())
+    c["publishing"] = {**c["publishing"], "send_images": False}
+    sent = []
+
+    class Fake(TelegramPublisher):
+        def publish(self, text, image_path=None):
+            sent.append(text)
+            return True, ""
+
+    db = _db()
+    pipe = RadarPipeline(c, db=db, loader=MarketDataLoader(c, SyntheticProvider(seed=7, end=END)),
+                         registry=ModelRegistry(Path(tempfile.mkdtemp())), publisher=Fake("t", "c"))
+    for t in sorted(_BUILDERS):
+        assert pipe.publish_test(t, "EURUSD"), t
+    assert len(sent) == len(_BUILDERS) and all(s.startswith("🧪 TEST POST") for s in sent)
+    from sqlalchemy import func, select
+    from database.models import Prediction, PostRow
+    with db.session() as s:
+        assert s.scalar(select(func.count(Prediction.id))) == 0 and s.scalar(select(func.count(PostRow.id))) == 0
+    try:
+        pipe.publish_test("NOPE")
+        raise AssertionError("unknown type must fail")
+    except ValueError:
+        pass
+
+
 def test_market_hours():
     c = {"market_hours": {"always_open": ["BTCUSD"], "session_only": ["US500"]}}
     utc = lambda s: datetime.fromisoformat(s).replace(tzinfo=timezone.utc)  # noqa: E731
-    assert is_market_open("EURUSD", c, utc("2026-10-07 12:00"))        # Wednesday
-    assert is_market_open("EURUSD", c, utc("2026-10-09 21:30"))        # Friday before 22:00
-    assert not is_market_open("EURUSD", c, utc("2026-10-09 22:00"))    # Friday close
-    assert not is_market_open("XAUUSD", c, utc("2026-10-10 12:00"))    # Saturday
-    assert not is_market_open("EURUSD", c, utc("2026-10-11 21:59"))    # Sunday before open
-    assert is_market_open("EURUSD", c, utc("2026-10-11 22:00"))        # Sunday open
-    assert is_market_open("BTCUSD", c, utc("2026-10-10 12:00"))        # crypto always
-    assert is_market_open("US500", c, utc("2026-10-07 03:00")) and not is_market_open("US500", c, utc("2026-10-10 12:00"))
+    assert is_market_open("EURUSD", c, utc("2026-01-07 12:00"))        # Wednesday
+    assert is_market_open("EURUSD", c, utc("2026-01-09 21:30"))        # Friday before 22:00
+    assert not is_market_open("EURUSD", c, utc("2026-01-09 22:00"))    # Friday close
+    assert not is_market_open("XAUUSD", c, utc("2026-01-10 12:00"))    # Saturday
+    assert not is_market_open("EURUSD", c, utc("2026-01-11 21:59"))    # Sunday before open
+    assert is_market_open("EURUSD", c, utc("2026-01-11 22:00"))        # Sunday open
+    assert is_market_open("BTCUSD", c, utc("2026-01-10 12:00"))        # crypto always
+    assert is_market_open("US500", c, utc("2026-01-07 03:00")) and not is_market_open("US500", c, utc("2026-01-10 12:00"))
 
 
 def _db(url=None):
