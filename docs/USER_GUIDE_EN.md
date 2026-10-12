@@ -33,19 +33,21 @@ SIMILARITY ▰▰▰▰▰▰▰▰▰▱ 94       ← how well this state is re
 MKT SCORE  ▰▰▰▰▰▰▰▱▱▱ 70       ← Market Intelligence Score (blend of all the above)
 
 🧊 COMPRESSION                  ← market state (section "Market states") + one-line meaning
-Probability ↑ over 4h: 68%      ← chance price is higher 4 candles later ("raw model" = not yet calibrated)
-Expected move: +0.05%
-Statistical edge: +14.0 pp vs baseline   ← ✅ ≥ 5 pp · 🔥 ≥ 10 pp (calibrated models only)
+Probability over 4h: ↑ 68% · ↓ 32%   ← both sides; bold = the side the models lean to ("raw model" = not calibrated, "no proven skill" = the model has not beaten the baseline)
+Statistical edge: +14.0 pp toward ↑ vs baseline   ← ✅ ≥ 5 pp · 🔥 ≥ 10 pp (only for calibrated models with proven skill)
+Expected move: +0.05%   ← shown only when it is larger than the normal noise; otherwise "≈0 (within normal ±0.09%)"
 
 🟢 Risk LOW · 🟡 Agreement MEDIUM
-🧬 Of 500 similar past situations, 62% were higher 4h later
-📈 Track record: building (37/100)   ← Brier score once 100+ predictions have resolved
+🧬 Of 100 similar past situations, 62% were higher 4h later   ← printed only when similarity ≥ 60; "≈ coin flip" when close to 50%
+📈 EUR/USD last 500 resolved (≈125 independent): Brier 0.231 vs baseline 0.246   ← per symbol; hidden until there are 100+ independent samples and the model beats the baseline
 🔬 Logistic + Random Forest + XGBoost · isotonic calibration · nearest-neighbour history search
 ⚠️ Statistical analysis · not financial advice
 #BTCUSD #MarketScan #Compression
 ```
 
 Bars: each ▰ is 10 points. Colour dots: 🟢 low / 🟡 medium / 🟠 high / 🔴 extreme risk; for agreement 🟢 high / 🟡 medium / 🟠 low. Labels such as *Probability*, *Statistical edge*, *Risk*, *Agreement* and *similar* in the post are links to the matching section of this guide, and the **🧭 How do I use this?** button under each post opens "Using it in your trading".
+
+⚖️ **Mixed signals** appears when trend/momentum point one way and the models lean the other; the edge is then reported as "none clear". A post can also be skipped for the first hours after the weekly market open, when gap candles look like events.
 
 All values are always shown. When the model has no measurable skill the numbers still appear, but treat them as context, not as an edge (see "Statistical edge").
 
@@ -72,6 +74,8 @@ All scores are on a 0–100 scale and are **non-directional** unless stated othe
 
 ---
 
+#### Section Market states
+
 ## Market states
 
 Assigned by transparent rules (later rules in this list override earlier ones when several apply):
@@ -93,11 +97,15 @@ A **REGIME CHANGE** post appears when the state differs from the previous candle
 
 ## Probability, edge and expected move
 
+#### Section Probability
+
 ### Probability
 The ensemble's estimate that price is **higher 4 candles from now**. It combines trend, momentum, historical similarity, a machine-learning model (logistic regression, random forest, optionally XGBoost) and cross-market information, then shrinks toward 50% when volatility or anomalies make conditions unstable.
 
 - **Below 50% means a lean downward** (the post still prints the "up" probability).
 - **`(raw model probability)`** means the number has not yet been calibrated against held-out data — treat it as a ranking, not a literal frequency. **`calibrated`** numbers are adjusted so that, historically, "60%" really happened about 60% of the time.
+
+#### Section Statistical edge
 
 ### Statistical edge
 `Edge = probability of the favoured side − that side's historical base rate` (shown in **percentage points, pp**).
@@ -108,6 +116,8 @@ The ensemble's estimate that price is **higher 4 candles from now**. It combines
 ### Expected move
 The model's average expected return over the next 4 candles (e.g. `+0.09%`). It is **not a target**; actual moves are usually much larger or smaller.
 
+#### Section Model agreement
+
 ### Model agreement
 How closely the individual models agree on the probability.
 
@@ -117,10 +127,14 @@ How closely the individual models agree on the probability.
 | **MEDIUM** | Same side with moderate spread, or a clear majority. |
 | **LOW** | Models disagree — treat any edge with extra scepticism. |
 
+#### Section Similarity
+
 ### Similarity
 From the *nearest historical look-alikes* (up to 500). `Historical UP 58%` means that in 58% of those past situations price was higher 4 candles later. `P25` and `P75` give the typical range of outcomes (the middle 50%): a wide P25–P75 means high uncertainty even if the median is positive.
 
 ---
+
+#### Section Risk
 
 ## Risk
 
@@ -153,6 +167,8 @@ Built from: volatility (30%), anomaly level (20%), directional uncertainty (20%)
 Posting rules: at most 3 posts per run, one best event per market, a **cooldown** per post type (e.g. 60–180 min), and a post is repeated only if the situation has materially changed. **No post does not mean calm** — it only means nothing new passed the filters.
 
 ---
+
+#### Section Using it in your trading
 
 ## Using it in your trading
 
