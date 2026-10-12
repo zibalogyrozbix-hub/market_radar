@@ -79,3 +79,16 @@ def test_targets_look_forward_and_last_rows_nan():
     i = 100
     assert abs(fr.iloc[i] - (f["close"].iloc[i + 4] / f["close"].iloc[i] - 1)) < 1e-12
     assert set(d.dropna().unique()) <= {0.0, 1.0}
+
+
+def test_donchian_window_is_configurable_and_breakout_tool():
+    from tools.tune_breakout import recommend, summarize_windows
+    from tests.helpers import candles as _c
+    df = _c("EURUSD", 1500)
+    a, b = build_features(df, donchian_window=20), build_features(df, donchian_window=72)
+    assert a["donch_up"].sum() > b["donch_up"].sum()  # a longer lookback is a stricter breakout
+    rows = summarize_windows({"EURUSD": df}, (20, 48, 72), 4)
+    assert [r["window"] for r in rows] == [20, 48, 72] and rows[0]["events"] > 0
+    assert 0 <= rows[0]["continued_pct"] <= 100
+    assert recommend([{"window": 20, "events": 10, "z": 5.0}])["window"] is None  # too few events
+    assert recommend([{"window": 48, "events": 500, "z": 2.5, "excess_pp": 3.0}])["window"] == 48
