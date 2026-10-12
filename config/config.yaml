@@ -166,9 +166,10 @@ publishing:
     DAILY_MARKET_SUMMARY: 1200
     MODEL_UPDATE: 600
   disclaimer: "Statistical analysis · not financial advice"
-  guide_url: "https://telegra.ph/FXSCAN--User-Guide-10-10"
-  guide_button: true
-  link_labels: true
+  guide_url: "https://telegra.ph/FXSCAN--User-Guide-10-10"   # public reader's guide (Telegraph)
+  guide_button: true     # inline button "🧭 How do I use this?" under every post
+  quiet_after_open_hours: 3   # no event posts for the first N hours after the weekly FX/metals open (gap candles)
+  link_labels: true      # hyperlink labels (Probability, Risk, ...) to guide sections
 
 telegram:
   enabled: true
