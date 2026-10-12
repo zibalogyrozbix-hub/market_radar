@@ -92,7 +92,7 @@ class RadarPipeline:
         cross = cross_market_engine.analyze(symbol, df, peers, cfg)
         anom = anomaly_engine.analyze(feat, cfg, cross)
         sim = similarity_engine.analyze(feat, fut, cfg, thr)
-        reg = regime_engine.analyze(feat)
+        reg = regime_engine.analyze(feat, confirm=int(cfg.get("regime", {}).get("confirm_candles", 2)))
 
         # ---- ML layer -------------------------------------------------------
         ml = self._ml_predict(symbol, tf, df, feat)
@@ -132,7 +132,7 @@ class RadarPipeline:
         ts = feat.index[-1]
         result = {
             "symbol": symbol, "timeframe": tf, "timestamp": ts.isoformat(), "price": float(last["close"]),
-            "horizon": horizon,
+            "horizon": horizon, "has_volume": bool(feat["tick_volume"].tail(100).fillna(0).sum() > 0),
             "trend_score": trend.get("trend_score"), "trend_direction": trend.get("trend_direction"),
             "momentum_score": mom.get("momentum_score"), "momentum_direction": mom.get("momentum_direction"),
             "volatility_score": vol.get("volatility_score"), "volatility_state": vol.get("volatility_state"),
@@ -296,32 +296,74 @@ class RadarPipeline:
         except Exception:
             return False
 
+    def _caps_state(self, now) -> Dict[str, int]:
+        """Events already published today (UTC), from the DB; in-process counter when there is no DB."""
+        if self.db is not None:
+            try:
+                from database import repository as repo
+                with self.db.session() as s:
+                    return repo.published_event_counts_since(s, now.replace(hour=0, minute=0, second=0, microsecond=0))
+            except Exception as exc:
+                log.debug("caps lookup failed: %s", exc)
+        return {"_total": 0}
+
+    def _log_rejected(self, ev: Dict[str, Any], reason: str) -> None:
+        log.info("event %s %s rejected: %s", ev["symbol"], ev["type"], reason)
+        if self.db is None:
+            return
+        try:
+            from database import repository as repo
+            with self.db.session() as s:
+                repo.log_rejected_event(s, ev, reason)
+        except Exception as exc:
+            log.debug("could not log rejected event: %s", exc)
+
     def rank_events(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Candidate events -> priority/dedupe/cooldown filter -> best event per symbol, capped per run."""
+        """Candidate events -> age/priority/dedupe/cooldown filter -> best event per symbol -> daily caps -> per-run cap."""
         now = datetime.now(timezone.utc)
+        pcfg = self.cfg["publishing"]
+        max_age = float(pcfg.get("max_event_age_minutes", 120))
         best: Dict[str, Dict[str, Any]] = {}
         for r in results:
             try:
                 from utils.market_hours import just_reopened
-                if just_reopened(r["symbol"], self.cfg, datetime.fromisoformat(r["timestamp"]),
-                                 float(self.cfg["publishing"].get("quiet_after_open_hours", 3))):
+                ts = datetime.fromisoformat(r["timestamp"])
+                if just_reopened(r["symbol"], self.cfg, ts, float(pcfg.get("quiet_after_open_hours", 3))):
                     log.info("%s: first candles after the weekly open - no event posts", r["symbol"])
                     continue
+                age_min = (now - (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc))).total_seconds() / 60
+                if max_age > 0 and age_min > max_age:
+                    log.info("%s: candle is %.0f min old (> %.0f) - no event posts", r["symbol"], age_min, max_age)
+                    continue
             except Exception as exc:
-                log.debug("reopen check skipped: %s", exc)
+                log.debug("reopen/age check skipped: %s", exc)
             for etype in prio.detect_candidate_events(r, self.cfg):
                 h = prio.event_hash(r["symbol"], r["timeframe"], etype, r["timestamp"])
                 ev = prio.evaluate_event(r, etype, self.cfg, self._last_event(r["symbol"], etype), self._event_known(h), now)
-                if not ev["publish"]:
-                    log.debug("event %s %s rejected: %s", r["symbol"], etype, ev["reason"])
-                    continue
                 ev.update({"hash": h, "symbol": r["symbol"], "timeframe": r["timeframe"], "event_time": r["timestamp"],
                            "why": r.get("why", []), "result": r})
+                if not ev["publish"]:
+                    if "duplicate" not in ev["reason"]:
+                        self._log_rejected(ev, ev["reason"])
+                    continue
                 log.info("Event detected: %s %s priority=%.2f", r["symbol"], etype, ev["priority"])
                 if r["symbol"] not in best or ev["priority"] > best[r["symbol"]]["priority"]:
                     best[r["symbol"]] = ev
         ranked = sorted(best.values(), key=lambda e: -e["priority"])
-        return ranked[: int(self.cfg["publishing"].get("max_posts_per_run", 3))]
+        # daily channel caps (UTC day): total and per symbol
+        day_cap, sym_cap = int(pcfg.get("max_posts_per_day", 12)), int(pcfg.get("max_posts_per_symbol_per_day", 3))
+        used = self._caps_state(now)
+        out: List[Dict[str, Any]] = []
+        for ev in ranked:
+            if len(out) >= int(pcfg.get("max_posts_per_run", 3)):
+                self._log_rejected(ev, "per-run cap")
+            elif day_cap > 0 and used.get("_total", 0) + len(out) >= day_cap:
+                self._log_rejected(ev, f"daily channel cap ({day_cap})")
+            elif sym_cap > 0 and used.get(ev["symbol"], 0) >= sym_cap:
+                self._log_rejected(ev, f"daily cap for {ev['symbol']} ({sym_cap})")
+            else:
+                out.append(ev)
+        return out
 
     def publish_events(self, results: List[Dict[str, Any]]) -> int:
         self.flush_pending()  # deliver anything that failed earlier before sending new posts
@@ -345,14 +387,28 @@ class RadarPipeline:
             if self.db is not None and "track_record" not in data and data.get("symbol"):
                 from database import repository as repo
                 with self.db.session() as s:
-                    df = repo.resolved_predictions_df(s, limit=1000)
+                    df = repo.resolved_predictions_df(s, symbol=data["symbol"], limit=1000)
                     df = df.dropna(subset=["probability_up"]) if len(df) else df
-                    if len(df):
-                        data["track_record"] = {"n": int(len(df)),
-                                                "brier": float(((df["probability_up"] - df["y"]) ** 2).mean())}
+                    data["track_record"] = self._track_record(data["symbol"], df, int(self.cfg["prediction"]["horizon"]))
         except Exception as exc:
             log.debug("post enrichment skipped: %s", exc)
         return data
+
+    @staticmethod
+    def _track_record(symbol: str, df, horizon: int) -> Dict[str, Any]:
+        """Live record of ONE symbol. Hourly predictions with a 4h horizon overlap, so only n/horizon of them are
+        independent. Shown only with >=100 independent samples AND a Brier score better than the baseline."""
+        out: Dict[str, Any] = {"symbol": symbol, "n": int(len(df)), "n_eff": 0, "show": False}
+        if not len(df):
+            return out
+        y, p = df["y"], df["probability_up"]
+        brier = float(((p - y) ** 2).mean())
+        base_rate = float(y.mean())
+        base_brier = base_rate * (1 - base_rate)  # always predicting the observed rate
+        n_eff = int(len(df) / max(horizon, 1))
+        out.update({"brier": brier, "base_brier": base_brier, "n_eff": n_eff,
+                    "show": n_eff >= 100 and brier < base_brier})
+        return out
 
     def _publish_one(self, post_type: str, data: Dict[str, Any], ev: Optional[Dict[str, Any]] = None) -> bool:
         text = generate_post(post_type, self._enrich(data), self.cfg)
@@ -428,7 +484,8 @@ class RadarPipeline:
                     raise RuntimeError(f"no valid data for {sym} {tf}")
         finally:
             self.db = saved_db
-        text = self.TEST_LABEL + generate_post(post_type, self._enrich(data), self.cfg)
+        from utils.version import code_version
+        text = self.TEST_LABEL.rstrip("\n") + f" · code {code_version()}\n\n" + generate_post(post_type, self._enrich(data), self.cfg)
         image_path = None
         if self.cfg["publishing"].get("send_images", True):
             try:
@@ -448,7 +505,14 @@ class RadarPipeline:
         try:
             from database import repository as repo
             with self.db.session() as s:
+                max_age = float(self.cfg["publishing"].get("pending_max_age_minutes", 120))
+                nowu = datetime.now(timezone.utc)
                 for p in repo.pending_posts(s):
+                    created = p.created_at if p.created_at.tzinfo else p.created_at.replace(tzinfo=timezone.utc)
+                    if max_age > 0 and (nowu - created).total_seconds() / 60 > max_age:
+                        repo.expire_post(s, p, f"expired: older than {max_age:.0f} min, not sent")
+                        log.info("pending post %s expired (too old to be useful)", p.id)
+                        continue
                     ok, err = self.publisher.publish(p.text, p.image_path)
                     repo.mark_post(s, p, ok, None if ok else err)
                     n += int(ok)

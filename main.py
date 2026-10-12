@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -120,6 +121,8 @@ def main(argv=None) -> int:
 
     db = _make_db(cfg, log)
     pipe = RadarPipeline(cfg, db=db)
+    from utils.version import code_version
+    logging.getLogger("market_radar").info("Code version: %s", code_version())
     symbols = [args.symbol.upper()] if args.symbol else None
     tfs = [args.timeframe.upper()] if args.timeframe else None
 
