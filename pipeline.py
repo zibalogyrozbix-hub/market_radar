@@ -301,6 +301,14 @@ class RadarPipeline:
         now = datetime.now(timezone.utc)
         best: Dict[str, Dict[str, Any]] = {}
         for r in results:
+            try:
+                from utils.market_hours import just_reopened
+                if just_reopened(r["symbol"], self.cfg, datetime.fromisoformat(r["timestamp"]),
+                                 float(self.cfg["publishing"].get("quiet_after_open_hours", 3))):
+                    log.info("%s: first candles after the weekly open - no event posts", r["symbol"])
+                    continue
+            except Exception as exc:
+                log.debug("reopen check skipped: %s", exc)
             for etype in prio.detect_candidate_events(r, self.cfg):
                 h = prio.event_hash(r["symbol"], r["timeframe"], etype, r["timestamp"])
                 ev = prio.evaluate_event(r, etype, self.cfg, self._last_event(r["symbol"], etype), self._event_known(h), now)
