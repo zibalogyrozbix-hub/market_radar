@@ -99,15 +99,21 @@ def render_card(result: Dict[str, Any], post_type: str, cfg: dict, out_path: Opt
     # bottom tiles
     ty, th, gap = 505, 112, 20
     tw = (W - 96 - 3 * gap) // 4
-    p = result.get("probability_up")
-    if result.get("edge_label") == "NO CLEAR EDGE" or p is None:
-        t1, v1, c1 = "DIRECTIONAL EDGE", "NO CLEAR EDGE", MUTED
-        t2, v2 = "EXPECTED MOVE", "—"
+    from publishing.consistency import consistency_guard
+    g = consistency_guard(result, cfg)
+    p, lean = g.get("probability_up"), g["lean"]
+    raw = "" if g.get("probability_kind") == "calibrated" else " RAW"
+    if p is None:
+        t1, v1, c1 = "PROBABILITY", "N/A", MUTED
+    elif lean["neutral"]:
+        t1, v1, c1 = "NO DIRECTIONAL LEAN", f"↑{p * 100:.0f}% ↓{(1 - p) * 100:.0f}%", MUTED
     else:
-        raw = "" if result.get("probability_kind") == "calibrated" else " raw"
-        t1, v1, c1 = "PROBABILITY ↑" + raw.upper(), f"{p * 100:.0f}%", TXT
-        er = result.get("expected_return")
-        t2, v2 = "EXPECTED MOVE", "N/A" if er is None else f"{er * 100:+.2f}%"
+        arrow = "↑" if lean["side"] == "UP" else "↓"
+        t1, v1, c1 = f"LEAN {arrow}{raw}", f"{lean['p_side'] * 100:.0f}%", TXT
+    mv = g["move"]
+    t2, v2 = "EXPECTED MOVE", (mv["text"] if mv["show"] else "≈ 0")
+    if g.get("alignment") == "mixed" and not lean["neutral"]:
+        t1, v1 = "MIXED SIGNALS", f"{'↑' if lean['side'] == 'UP' else '↓'} {lean['p_side'] * 100:.0f}%"
     risk = result.get("risk", "N/A")
     tiles = [(t1, v1, c1), (t2, v2, TXT), ("REGIME", str(result.get("regime", "N/A")).replace("_", " "), accent),
              ("RISK", risk, RISK_COLOR.get(risk, MUTED))]

@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from config.settings import display_name
+from publishing.consistency import consistency_guard, edge_trusted, lean_of
 
 POST_TYPES = ["MARKET_SCAN", "ANOMALY_ALERT", "HISTORICAL_MATCH", "REGIME_CHANGE", "CROSS_MARKET_BREAK",
               "VOLATILITY_ALERT", "DAILY_MARKET_SUMMARY", "MODEL_UPDATE"]
@@ -181,27 +182,39 @@ def _state_block(r, cfg, link) -> str:
 
 
 def _edge_lines(r, link) -> List[str]:
-    """Probability / edge / expected move. Always shown; the edge is only highlighted when it is calibrated
-    and the model has shown measurable skill."""
+    """Probability (both sides) / edge / mixed-signal note / expected move. All values stay visible, but the text never
+    claims more than the models can support: see publishing/consistency.py."""
+    r = r if "lean" in r else consistency_guard(r)
     p = r.get("probability_up")
     raw = r.get("probability_kind") != "calibrated"
     skill = r.get("model_skill")
     noskill = skill is None or skill <= 0
-    hz = _horizon(r)
+    hz = r.get("horizon_txt") or _horizon(r)
+    lean = r["lean"]
     if p is None:
-        return [f"{link('probability', 'Probability')} ↑ over {hz}: N/A"]
+        return [f"{link('probability', 'Probability')} over {hz}: N/A"]
     tags = (["raw model"] if raw else []) + (["no proven skill"] if noskill else [])
-    lines = [f"{link('probability', 'Probability')} ↑ over {hz}: <b>{p * 100:.0f}%</b>" + (f" ({' · '.join(tags)})" if tags else "")]
+    up, dn = f"↑ {p * 100:.0f}%", f"↓ {(1 - p) * 100:.0f}%"
+    if lean["neutral"]:
+        body = f"{up} · {dn} — no directional lean"
+    else:
+        body = f"<b>{up}</b> · {dn}" if lean["side"] == "UP" else f"{up} · <b>{dn}</b>"
+    lines = [f"{link('probability', 'Probability')} over {hz}: {body}" + (f" ({' · '.join(tags)})" if tags else "")]
     edge = r.get("edge")
     side = "↓" if p < 0.5 else "↑"
-    if r.get("edge_label") == "NO CLEAR EDGE":
-        lines.append(f"{link('edge', 'Statistical edge')}: none clear" + (f" ({edge * 100:+.1f} pp)" if edge is not None else ""))
+    el = link('edge', 'Statistical edge')
+    if r.get("alignment") == "mixed":
+        lines.append(f"{el}: none clear (mixed signals)")
+    elif r.get("edge_label") == "NO CLEAR EDGE" or lean["neutral"]:
+        lines.append(f"{el}: none clear" + (f" ({edge * 100:+.1f} pp)" if edge is not None else ""))
     elif edge is None or r.get("edge_label") == "N/A":
-        lines.append(f"{link('edge', 'Statistical edge')}: N/A")
+        lines.append(f"{el}: N/A")
     else:
-        mark = "" if (raw or noskill) else (" 🔥" if edge * 100 >= 10 else " ✅" if edge * 100 >= 5 else "")
-        lines.append(f"{link('edge', 'Statistical edge')}: {edge * 100:+.1f} pp toward {side} vs baseline{mark}")
-    lines.append(f"<blockquote>Expected move: {_move(r.get('expected_return'))}</blockquote>")  # quoted for visibility
+        mark = "" if not edge_trusted(r) else (" 🔥" if edge * 100 >= 10 else " ✅" if edge * 100 >= 5 else "")
+        lines.append(f"{el}: {edge * 100:+.1f} pp toward {side} vs baseline{mark}")
+    if r.get("mixed_note"):
+        lines.append(f"⚖️ Mixed signals: {_e(r['mixed_note'])}")
+    lines.append(f"<blockquote>Expected move: {_e(r['move']['text'])}</blockquote>")  # quoted for visibility
     return lines
 
 
@@ -212,22 +225,25 @@ def _risk_line(r, link) -> str:
 
 
 def _history_line(r, link) -> str:
-    n, up = r.get("similar_states"), r.get("historical_up_rate")
-    if not n or up is None:
-        return "🧬 Similar past situations: N/A"
+    r = r if "history" in r else consistency_guard(r)
+    if not r["history"]["show"]:
+        return ""  # weak similarity: the line would suggest more than the data supports
+    n, up = r["similar_states"], r["historical_up_rate"]
     sim = r.get("similarity_details") or {}
-    s = f"🧬 Of {n:,} {link('similarity', 'similar')} past situations, {up * 100:.0f}% were higher {_horizon(r)} later"
+    flip = " (≈ coin flip)" if r["history"]["coin_flip"] else ""
+    s = f"🧬 Of {n:,} {link('similarity', 'similar')} past situations, {up * 100:.0f}% were higher {_horizon(r)} later{flip}"
     if sim.get("p25") is not None and sim.get("p75") is not None:
         s += f"\n    range of outcomes (P25–P75): {_pct(sim['p25'])} … {_pct(sim['p75'])}"
     return s
 
 
 def _track_line(r) -> str:
+    """Per-symbol live record, shown only once it is statistically meaningful AND better than the baseline."""
     t = r.get("track_record") or {}
-    n = int(t.get("n") or 0)
-    if n >= 100 and t.get("brier") is not None:
-        return f"📈 Last {n} resolved: Brier {t['brier']:.3f} (0.250 = coin flip)"
-    return f"📈 Track record: building ({n}/100)"
+    if t.get("show") and t.get("brier") is not None and t.get("base_brier") is not None:
+        return (f"📈 {_e(t.get('symbol', ''))} last {t['n']} resolved (≈{t['n_eff']} independent): "
+                f"Brier {t['brier']:.3f} vs baseline {t['base_brier']:.3f}")
+    return ""
 
 
 _MODEL_NAMES = {"logistic": "Logistic", "random_forest": "Random Forest", "rf": "Random Forest", "xgboost": "XGBoost",
@@ -271,8 +287,7 @@ def _bars(r) -> str:
 # ---------------------------------------------------------------- post types
 def market_scan(r, cfg) -> str:
     link = _links(cfg)
-    reg = r.get("regime")
-    watch = REGIMES.get(reg, ("", "", "", ""))[3]
+    r = consistency_guard(r, cfg)
     return _join(
         _h(r, cfg, _regime_headline(r, cfg)),
         _bars(r),
@@ -280,7 +295,7 @@ def market_scan(r, cfg) -> str:
         "\n".join(_edge_lines(r, link)),
         _risk_line(r, link),
         _history_line(r, link),
-        f"👀 Watch: {_e(watch)}" if watch else "",
+        f"👀 Watch: {_e(r['watch'])}" if r.get("watch") else "",
         "\n".join(x for x in (_track_line(r), _methods(r, ["ml", "similarity"])) if x),
         _disclaimer(cfg) + "\n" + _hashtags(r, "MarketScan"),
     )
@@ -294,8 +309,9 @@ def anomaly_alert(r, cfg) -> str:
     def sig(k):
         return "N/A" if d.get(k) is None else f"{d[k]:+.1f}σ"
 
-    rows = [("Volatility", sig("z_vol")), ("Velocity", sig("z_velocity")), ("Return", sig("z_ret")),
-            ("Volume", _score(comp.get("VOLUME_ANOMALY")))]
+    rows = [("Volatility", sig("z_vol")), ("Velocity", sig("z_velocity")), ("Return", sig("z_ret"))]
+    if r.get("has_volume", True):  # Twelve Data has no real volume for FX/metals: never print a meaningless row
+        rows.append(("Volume", _score(comp.get("VOLUME_ANOMALY"))))
     if r.get("correlation_break"):
         rows.append(("Corr.break", _score(comp.get("CORRELATION_BREAK"))))
     body = "<code>" + "\n".join([f"{'ANOMALY':<10} {_bar(r.get('anomaly_score'))}"] +
@@ -440,6 +456,8 @@ def strip_html(text: str) -> str:
 def generate_post(post_type: str, data: Dict[str, Any], cfg: dict) -> str:
     if post_type not in _BUILDERS:
         raise ValueError(f"unknown post type {post_type}")
+    if post_type not in ("DAILY_MARKET_SUMMARY", "MODEL_UPDATE"):
+        data = consistency_guard(data, cfg)  # one source of truth for what the post may claim
     text = _BUILDERS[post_type](data, cfg)
     up = strip_html(text).upper()
     for negated in ("NOT A GUARANTEED", "DOES NOT GUARANTEE", "NO GUARANTEE"):  # honest disclaimers are allowed
