@@ -8,7 +8,7 @@ on:
       job:
         description: "What to run"
         type: choice
-        options: [scan, summary, train, evaluate, check-data, test-post]
+        options: [scan, summary, train, evaluate, check-data, test-post, tune-breakout]
         default: scan
       post_type:
         description: "For job=test-post: which post to send as a sample"
@@ -66,6 +66,7 @@ jobs:
             train)      python main.py --train $ARGS && python main.py --evaluate ;;
             evaluate)   python main.py --evaluate ;;
             check-data) python main.py --check-data $ARGS ;;
+            tune-breakout) python main.py --tune-breakout $ARGS ;;
             test-post)  python main.py --test-post "$POST_TYPE" $ARGS ;;
             *)          echo "unknown job: $JOB"; exit 2 ;;
           esac
