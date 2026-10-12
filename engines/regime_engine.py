@@ -44,8 +44,16 @@ class RuleBasedRegime(RegimeDetector):
         return out
 
 
-def analyze(feat: pd.DataFrame, detector: RegimeDetector | None = None) -> dict:
+def analyze(feat: pd.DataFrame, detector: RegimeDetector | None = None, confirm: int = 2) -> dict:
+    """regime_changed needs the new regime to hold for `confirm` consecutive candles (default 2), so a one-candle
+    flicker is ignored. The change is derived from the candle history itself, so a scan that was skipped for an hour
+    does not lose it (the next scan still sees `confirm` candles of the new regime after a different one)."""
     det = detector or RuleBasedRegime()
-    s = det.detect_series(feat.tail(5))
-    cur, prev = str(s.iloc[-1]), str(s.iloc[-2]) if len(s) > 1 else "UNKNOWN"
-    return {"regime": cur, "previous_regime": prev, "regime_changed": cur != prev and prev != "UNKNOWN"}
+    confirm = max(1, int(confirm))
+    s = det.detect_series(feat.tail(confirm + 4)).astype(str)
+    cur = s.iloc[-1]
+    if len(s) <= confirm:
+        return {"regime": cur, "previous_regime": "UNKNOWN", "regime_changed": False}
+    prev = s.iloc[-confirm - 1]
+    held = bool((s.iloc[-confirm:] == cur).all())
+    return {"regime": cur, "previous_regime": prev, "regime_changed": held and cur != prev and prev != "UNKNOWN"}

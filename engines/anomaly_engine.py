@@ -72,7 +72,15 @@ def analyze(feat: pd.DataFrame, cfg: dict | None = None, cross: Optional[dict] =
         types.append("CORRELATION_BREAK")
     scores["CORRELATION_BREAK"] = corr_score
 
-    ranked = sorted(scores.values(), reverse=True)
+    # z_ret / z_velocity / z_vol move together; the second term must come from a different family, otherwise
+    # one event is counted twice.
+    cluster = {"RETURN_ANOMALY": "price", "VELOCITY_ANOMALY": "price", "VOLATILITY_SPIKE": "vol",
+               "VOLUME_ANOMALY": "liquidity", "SPREAD_ANOMALY": "liquidity", "CORRELATION_BREAK": "cross"}
+    best_by_cluster: Dict[str, float] = {}
+    for k, v in scores.items():
+        c = cluster.get(k, k)
+        best_by_cluster[c] = max(best_by_cluster.get(c, 0.0), v)
+    ranked = sorted(best_by_cluster.values(), reverse=True)
     stat = (0.7 * ranked[0] + 0.3 * ranked[1]) if len(ranked) > 1 else (ranked[0] if ranked else 0.0)
 
     iso = None
