@@ -57,7 +57,7 @@ def train_symbol(symbol: str, timeframe: str, candles: pd.DataFrame, cfg: dict,
     horizon = int(cfg["prediction"]["horizon"])
     thr = float(cfg["prediction"].get("direction_threshold", 0.0))
     mcfg = cfg.get("models", {})
-    _, ds = build_dataset(candles, horizon, thr)
+    _, ds = build_dataset(candles, horizon, thr, int(cfg.get("regime", {}).get("donchian_window", 20)))
     if len(ds) < max(int(mcfg.get("min_train_rows", 400)) * 2, 600):
         log.warning("%s %s: only %d training rows - skipped", symbol, timeframe, len(ds))
         return {"symbol": symbol, "timeframe": timeframe, "trained": False, "reason": f"only {len(ds)} rows"}

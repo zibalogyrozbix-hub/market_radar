@@ -8,11 +8,11 @@ import pandas as pd
 from features.builder import FEATURE_COLUMNS, build_features, make_targets
 
 
-def build_dataset(candles: pd.DataFrame, horizon: int, threshold: float = 0.0) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def build_dataset(candles: pd.DataFrame, horizon: int, threshold: float = 0.0, donchian_window: int = 20) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Returns (feature_frame, dataset). `dataset` has FEATURE_COLUMNS + direction + future_return,
     with rows whose targets are not yet known (last `horizon` bars) or whose features are NaN removed.
     """
-    feat = build_features(candles)
+    feat = build_features(candles, donchian_window=donchian_window)
     direction, fut = make_targets(feat["close"], horizon, threshold)
     ds = feat[FEATURE_COLUMNS].join(direction).join(fut).dropna()
     return feat, ds
