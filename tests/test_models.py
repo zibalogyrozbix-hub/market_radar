@@ -115,7 +115,7 @@ def test_ensemble_weights_from_config_and_bounds():
              "model_probs": {"logistic": 0.68, "random_forest": 0.75}}
     out = ens.combine(parts, cfg()["weights"])
     assert 0.5 < out["probability_up"] < 0.8 and abs(out["probability_up"] + out["probability_down"] - 1) < 1e-9
-    assert out["probability_kind"] == "raw model probability" and out["model_agreement"] == "HIGH"
+    assert out["probability_kind"] == "raw model probability" and out["model_agreement"] == "MEDIUM"  # trend/momentum (<=0.60) now count too
     assert 0.002 <= out["expected_return"] <= 0.003
     # heavier ML weight must move the output toward the ML probability
     w2 = dict(cfg()["weights"], ml_weight=5.0)

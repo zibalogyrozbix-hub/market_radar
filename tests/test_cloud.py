@@ -264,3 +264,27 @@ def test_pipeline_scan_skips_closed_and_peer_only():
     pipe.cfg = c
     got = pipe.scannable_symbols()
     assert "US500" not in got and "NAS100" not in got and "EURGBP" in got or not is_market_open("EURGBP", c)
+
+
+def test_event_log_caps_and_pending_expiry():
+    from datetime import timedelta
+    from database import repository as repo
+    from database.models import PostRow
+    db = _db()
+    now = datetime.now(timezone.utc)
+    ev = {"hash": "h1", "symbol": "EURUSD", "timeframe": "H1", "type": "MARKET_SCAN", "event_time": now.isoformat(),
+          "priority": 0.9, "signature": {}, "why": []}
+    with db.session() as s:
+        repo.log_rejected_event(s, ev, "priority 0.30 <= 0.45")
+        repo.log_rejected_event(s, ev, "again")  # idempotent
+    with db.session() as s:
+        assert not repo.event_exists(s, "h1") and repo.published_event_counts_since(s, now - timedelta(days=1))["_total"] == 0
+        repo.create_event(s, ev, published=True)
+    with db.session() as s:
+        assert repo.event_exists(s, "h1")
+        c = repo.published_event_counts_since(s, now - timedelta(days=1))
+        assert c["_total"] == 1 and c["EURUSD"] == 1
+        p = repo.create_post(s, "MARKET_SCAN", "EURUSD", "x", None)
+        repo.expire_post(s, p, "expired")
+    with db.session() as s:
+        assert repo.pending_posts(s) == [] and s.get(PostRow, p.id).status == "expired"

@@ -64,16 +64,18 @@ def test_raw_probability_is_labelled_and_na_is_shown():
     raw = generate_post("MARKET_SCAN", r(probability_kind="raw model probability"), cfg())
     assert "(raw model)" in raw and "baseline 🔥" not in raw and "✅" not in raw
     na = generate_post("MARKET_SCAN", r(similarity_score=None, similar_states=None, historical_up_rate=None), cfg())
-    assert "▱▱▱▱▱▱▱▱▱▱ N/A" in na and "Similar past situations: N/A" in na
+    assert "▱▱▱▱▱▱▱▱▱▱ N/A" in na and "similar" not in na.lower().replace("similarity", "")  # weak/absent similarity: no history line
 
 
 def test_track_record_and_methods_lines_and_html_escape():
     from publishing.post_generator import strip_html
-    t = strip_html(generate_post("MARKET_SCAN", r(track_record={"n": 37, "brier": 0.2}), cfg()))
-    assert "building (37/100)" in t
-    t = strip_html(generate_post("MARKET_SCAN", r(track_record={"n": 150, "brier": 0.231},
+    t = strip_html(generate_post("MARKET_SCAN", r(track_record={"symbol": "XAUUSD", "n": 150, "n_eff": 37, "show": False}), cfg()))
+    assert "Brier" not in t and "Track record" not in t  # hidden until meaningful
+    t = strip_html(generate_post("MARKET_SCAN", r(track_record={"symbol": "XAUUSD", "n": 500, "n_eff": 125, "brier": 0.231,
+                                                                 "base_brier": 0.246, "show": True},
                                                    methods_info={"models": ["logistic", "xgboost"], "calibration": "isotonic"}), cfg()))
-    assert "Brier 0.231" in t and "Logistic + XGBoost" in t and "isotonic calibration" in t
+    assert "Brier 0.231 vs baseline 0.246" in t and "≈125 independent" in t
+    assert "Logistic + XGBoost" in t and "isotonic calibration" in t
     assert "&lt;" in generate_post("ANOMALY_ALERT", r(why=["a<b"]), cfg())
 
 
@@ -112,9 +114,12 @@ def test_priority_threshold_dedupe_and_cooldown():
     last = {"time": now - timedelta(minutes=20), "signature": prio.signature(BASE)}
     cool = prio.evaluate_event(BASE, "ANOMALY_ALERT", c, last, False, now)
     assert not cool["publish"] and "cooldown" in cool["reason"]
-    # a materially different situation overrides the cooldown
-    changed = prio.evaluate_event(r(anomaly_score=99.0, regime="BREAKOUT"), "ANOMALY_ALERT", c, last, False, now)
-    assert changed["publish"]
+    # a different regime / small change is NOT enough to break a cooldown ...
+    small = prio.evaluate_event(r(anomaly_score=99.0, regime="BREAKOUT"), "ANOMALY_ALERT", c, last, False, now)
+    assert not small["publish"] and "cooldown" in small["reason"]
+    # ... a real intensification (+15 anomaly points or more) is
+    last70 = {"time": now - timedelta(minutes=20), "signature": prio.signature(r(anomaly_score=70.0))}
+    assert prio.evaluate_event(r(anomaly_score=99.0), "ANOMALY_ALERT", c, last70, False, now)["publish"]
 
 
 def test_event_hash_stable_and_distinct():
@@ -228,8 +233,9 @@ def test_scheduler_alignment_and_daemon_loop():
 
 def test_edge_direction_skill_label_and_zero_move():
     from publishing.post_generator import strip_html
-    down = strip_html(generate_post("MARKET_SCAN", r(probability_up=0.40, edge=0.051, expected_return=-0.000001), cfg()))
-    assert "toward ↓" in down and "≈0.00%" in down and "-0.00%" not in down
+    down = strip_html(generate_post("MARKET_SCAN", r(probability_up=0.40, edge=0.071, expected_return=-0.000001,
+                                                     trend_direction="DOWN", momentum_direction="DOWN"), cfg()))
+    assert "toward ↓" in down and "≈0 (within normal" in down and "-0.00%" not in down
     ns = strip_html(generate_post("MARKET_SCAN", r(model_skill=-0.03), cfg()))
     assert "no proven skill" in ns and "baseline 🔥" not in ns
     assert "no proven skill" not in strip_html(generate_post("MARKET_SCAN", BASE, cfg()))
@@ -245,3 +251,143 @@ def test_weekly_open_quiet_window_and_dst_hours():
     assert not just_reopened("EURUSD", c, u(2026, 10, 12, 0), 3) and not just_reopened("BTCUSD", c, u(2026, 10, 11, 21), 3)
     # January = winter time: opens 22:00 UTC
     assert not is_market_open("EURUSD", c, u(2026, 1, 11, 21, 30)) and is_market_open("EURUSD", c, u(2026, 1, 11, 22, 5))
+
+
+# ---- consistency guard (list items 15-22) --------------------------------------------------------------
+AUD = dict(symbol="AUDUSD", regime="TREND_DOWN", trend_score=57.0, trend_direction="DOWN", momentum_score=39.0,
+           momentum_direction="DOWN", volatility_score=23.0, anomaly_score=0.0, similarity_score=43.0, market_score=32.0,
+           probability_up=0.53, probability_kind="raw model probability", model_skill=-0.02, edge=0.03, edge_label="NO CLEAR EDGE",
+           expected_return=0.0002, similar_states=100, historical_up_rate=0.55, risk="MEDIUM", model_agreement="MEDIUM",
+           similarity_details={"history_size": 4000, "p25": -0.0008, "p75": 0.0009}, regime_changed=False)
+
+
+def test_regression_aud_usd_downtrend_with_up_probability():
+    from publishing.post_generator import strip_html
+    t = strip_html(generate_post("MARKET_SCAN", r(**AUD), cfg()))
+    assert "↑ 53% · ↓ 47%" in t and "no directional lean" not in t  # 3 pp from 50% is a (weak) lean, shown on both sides
+    assert "Mixed signals: trend ↘ · momentum ↘, models lean ↑" in t
+    assert "Statistical edge: none clear (mixed signals)" in t
+    assert "≈0 (within normal ±0.09%)" in t and "+0.02%" not in t   # expected move is below the noise band
+    assert "Similar past situations" not in t and "similar past situations" not in t  # similarity 43 < 60: no history line
+    assert "weaker than the trend" in t  # momentum 39 < trend 57: the "fading" watch line is true here
+
+
+def test_regression_gbp_usd_uptrend_with_down_lean_and_conditional_watch():
+    from publishing.post_generator import strip_html
+    g = dict(AUD, symbol="GBPUSD", regime="TREND_UP", trend_direction="UP", momentum_direction="UP", momentum_score=50.0,
+             trend_score=45.0, probability_up=0.37)
+    t = strip_html(generate_post("MARKET_SCAN", r(**g), cfg()))
+    assert "↑ 37% · ↓ 63%" in t and "Mixed signals: trend ↗ · momentum ↗, models lean ↓" in t
+    assert "fading" not in t  # momentum (50) is stronger than the trend (45) and in the same direction
+
+
+def test_neutral_band_and_aligned_signals():
+    from publishing.consistency import consistency_guard
+    n = consistency_guard(r(probability_up=0.51), cfg())
+    assert n["lean"]["neutral"] and n["alignment"] == "n/a"
+    a = consistency_guard(r(**dict(AUD, probability_up=0.35)), cfg())
+    assert a["lean"]["side"] == "DOWN" and a["alignment"] == "aligned"
+
+
+def test_expected_move_shown_only_when_meaningful_and_same_side():
+    from publishing.consistency import consistency_guard
+    big = consistency_guard(r(**dict(AUD, probability_up=0.70, expected_return=0.0020)), cfg())
+    assert big["move"]["show"] and big["move"]["text"] == "+0.20%"
+    wrong_side = consistency_guard(r(**dict(AUD, probability_up=0.70, expected_return=-0.0020)), cfg())
+    assert not wrong_side["move"]["show"]
+
+
+def test_history_line_gated_and_coin_flip_label():
+    from publishing.post_generator import strip_html
+    t = strip_html(generate_post("MARKET_SCAN", r(similarity_score=80.0, historical_up_rate=0.51, similar_states=100), cfg()))
+    assert "coin flip" in t
+    t2 = strip_html(generate_post("MARKET_SCAN", r(similarity_score=80.0, historical_up_rate=0.70, similar_states=100), cfg()))
+    assert "70% were higher" in t2 and "coin flip" not in t2
+
+
+def test_volume_row_hidden_without_real_volume():
+    from publishing.post_generator import strip_html
+    assert "Volume" in strip_html(generate_post("ANOMALY_ALERT", BASE, cfg()))
+    assert "Volume" not in strip_html(generate_post("ANOMALY_ALERT", r(has_volume=False), cfg()))
+
+
+def test_image_card_uses_same_logic_as_text():
+    from publishing.consistency import consistency_guard
+    g = consistency_guard(r(**AUD), cfg())
+    assert g["alignment"] == "mixed" and not g["move"]["show"]
+    with tempfile.TemporaryDirectory() as d:
+        assert render_card(r(**AUD), "MARKET_SCAN", cfg(), Path(d) / "a.png").exists()
+
+
+# ---- priority / edge / regime (list items 1-6, 18) ------------------------------------------------------
+def test_untrusted_edge_gets_no_priority_and_cannot_trigger_scan():
+    raw_edge = r(edge_label="CLEAR EDGE", edge=0.12, market_score=30.0, model_skill=-0.02)
+    assert prio.priority_score(raw_edge, 0.0, {"probability_edge": 1.0})["probability_edge"] == 0.0
+    assert "MARKET_SCAN" not in prio.detect_candidate_events(raw_edge, cfg())
+    good = r(edge_label="CLEAR EDGE", edge=0.12, market_score=30.0, model_skill=0.04, probability_kind="calibrated")
+    assert prio.priority_score(good, 0.0, {"probability_edge": 1.0})["probability_edge"] == 0.8
+    assert "MARKET_SCAN" in prio.detect_candidate_events(good, cfg())
+
+
+def test_novelty_ignores_regime_code_but_scores_it_moderately():
+    s1 = prio.signature(BASE)
+    s2 = dict(s1, regime_code=s1["regime_code"] + 1)
+    assert prio.novelty_score(s1, s2) == 0.6 and prio.novelty_score(None, s1) == 1.0 and prio.novelty_score(s1, s1) == 0.0
+
+
+def test_regime_and_volatility_events_have_their_own_weights():
+    c = cfg()
+    reg = r(regime_changed=True, edge_label="NO CLEAR EDGE", anomaly_score=10.0, similarity_score=20.0, correlation_break=False)
+    out = prio.evaluate_event(reg, "REGIME_CHANGE", c, None, False, datetime(2026, 1, 5, 13, tzinfo=timezone.utc))
+    assert out["publish"]  # first-seen regime change reaches the threshold even without an ML edge
+    vol = r(volatility_state="EXPANSION", volatility_score=96.0, anomaly_score=5.0, similarity_score=10.0, regime_changed=False,
+            correlation_break=False)
+    assert prio.evaluate_event(vol, "VOLATILITY_ALERT", c, None, False, datetime(2026, 1, 5, 13, tzinfo=timezone.utc))["publish"]
+
+
+def test_edge_uses_half_as_floor_and_needs_distance_from_50():
+    from scoring.scorer import compute_edge
+    drift = compute_edge(0.53, 0.442, 0.07)  # asset drifted down 44%; a 53% up-probability is NOT an 8.8 pp edge
+    assert drift["edge"] == 0.03 and drift["edge_label"] == "NO CLEAR EDGE"
+    assert compute_edge(0.62, 0.50, 0.07)["edge_label"] == "CLEAR EDGE"
+    assert compute_edge(0.30, 0.50, 0.07)["edge"] == 0.2  # down side measured against 50%, not the up base rate
+
+
+def test_regime_change_needs_confirmation():
+    import pandas as pd
+    from engines import regime_engine
+
+    class Seq(regime_engine.RegimeDetector):
+        def __init__(self, seq):
+            self.seq = seq
+
+        def detect_series(self, feat):
+            return pd.Series(self.seq[-len(feat):], index=feat.index, dtype=object)
+
+    feat = pd.DataFrame({"x": range(10)})
+    flicker = regime_engine.analyze(feat, Seq(["RANGE"] * 8 + ["BREAKOUT", "RANGE"]), confirm=2)
+    assert not flicker["regime_changed"]
+    one = regime_engine.analyze(feat, Seq(["RANGE"] * 9 + ["BREAKOUT"]), confirm=2)
+    assert not one["regime_changed"]  # one candle is not confirmed yet
+    held = regime_engine.analyze(feat, Seq(["RANGE"] * 8 + ["BREAKOUT", "BREAKOUT"]), confirm=2)
+    assert held["regime_changed"] and held["previous_regime"] == "RANGE" and held["regime"] == "BREAKOUT"
+    assert regime_engine.analyze(feat, Seq(["RANGE"] * 9 + ["BREAKOUT"]), confirm=1)["regime_changed"]  # old behaviour
+
+
+def test_anomaly_second_term_comes_from_another_cluster():
+    import numpy as np
+    import pandas as pd
+    from engines import anomaly_engine
+    idx = pd.date_range("2026-01-01", periods=400, freq="h", tz="UTC")
+    base = {c: 0.0 for c in ("z_ret", "z_vol", "z_tickvol", "z_spread", "z_velocity")}
+    feat = pd.DataFrame(base, index=idx)
+    for c in anomaly_engine.FEATURE_COLUMNS:
+        if c not in feat:
+            feat[c] = np.random.default_rng(0).normal(size=len(idx))
+    one_cluster = feat.copy()
+    one_cluster.loc[idx[-1], ["z_ret", "z_velocity"]] = 4.0  # same family twice: must not be double counted
+    two_cluster = feat.copy()
+    two_cluster.loc[idx[-1], ["z_ret", "z_vol"]] = 4.0
+    c = {"anomaly": {"use_isolation_forest": False}}
+    assert anomaly_engine.analyze(one_cluster, c)["anomaly_score"] == 70.0
+    assert anomaly_engine.analyze(two_cluster, c)["anomaly_score"] == 100.0
