@@ -48,7 +48,8 @@ twelvedata:
 
 # Weekend / session handling (UTC). FX & metals follow the FX week (closed Fri 22:00 -> Sun 22:00).
 regime:
-  donchian_window: 48     # BREAKOUT = close beyond the high/low of the previous N candles (+ ATR ratio > 1.1).
+  confirm_candles: 2      # a regime change is announced only after the new regime held for N candles
+  donchian_window: 20     # BREAKOUT = close beyond the high/low of the previous N candles (+ ATR ratio > 1.1).
                           # Test alternatives with the `tune-breakout` job, then set e.g. 48. After changing it, run the `train` job
                           # (it is also a model feature, so models must be retrained).
 
@@ -104,9 +105,9 @@ anomaly:
   use_isolation_forest: true
 
 similarity:
-  k: 500
+  k: 100                    # neighbours used (was 500 = 10% of the history, too diluted)
   min_history: 800
-  min_neighbors: 50         # fewer => similarity reported as N/A
+  min_neighbors: 50         # fewer => similarity reported as N/A (must stay <= k)
   embargo: 8                # bars excluded before "now" (future return must be known)
 
 models:
@@ -140,7 +141,7 @@ score_weights:
   cross_market: 0.06
 
 thresholds:
-  min_edge: 0.05            # below => NO CLEAR EDGE
+  min_edge: 0.07            # below => NO CLEAR EDGE (edge = p_side - max(0.5, side base rate); also needs |p-0.5| >= 0.05)
   post_priority: 0.45
   anomaly_alert: 80
   similarity_alert: 85
@@ -160,6 +161,10 @@ publishing:
   scheduled_scan_every_minutes: 60
   daily_summary_hour_utc: 20
   max_posts_per_run: 3
+  max_posts_per_day: 12              # channel cap per UTC day (events only)
+  max_posts_per_symbol_per_day: 3
+  max_event_age_minutes: 120         # candle OPEN time + 1h close + 1h grace; older candles are not announced
+  pending_max_age_minutes: 120       # undelivered posts older than this are marked expired instead of sent late
   send_images: true
   cooldown_minutes:
     MARKET_SCAN: 180
