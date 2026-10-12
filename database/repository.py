@@ -122,7 +122,31 @@ def resolved_predictions_df(s, symbol: Optional[str] = None, limit: Optional[int
 
 # ---- events / posts --------------------------------------------------------------------
 def event_exists(s, event_hash: str) -> bool:
-    return s.scalar(select(EventRow.id).where(EventRow.event_hash == event_hash)) is not None
+    """Duplicate check: only *published* events count (rejected ones are logged for tuning but may be re-evaluated)."""
+    return s.scalar(select(EventRow.id).where(EventRow.event_hash == event_hash, EventRow.published.is_(True))) is not None
+
+
+def published_event_counts_since(s, since: datetime) -> Dict[str, int]:
+    """{'_total': n, 'SYMBOL': n, ...} of events published since `since` (for the daily channel caps)."""
+    out: Dict[str, int] = {"_total": 0}
+    for e in s.scalars(select(EventRow).where(EventRow.created_at >= since, EventRow.published.is_(True))):
+        out["_total"] += 1
+        out[e.symbol] = out.get(e.symbol, 0) + 1
+    return out
+
+
+def log_rejected_event(s, ev: Dict[str, Any], reason: str) -> None:
+    """Store a rejected candidate (published=False) with the reason, so thresholds can be tuned on real data."""
+    h = ev["hash"] + "r"  # distinct from the published hash space; unique per candidate and candle
+    if s.scalar(select(EventRow.id).where(EventRow.event_hash == h)) is not None:
+        return
+    s.add(EventRow(event_hash=h[:64], symbol=ev["symbol"], timeframe=ev["timeframe"], event_type=ev["type"],
+                   event_time=to_dt(ev["event_time"]), priority=ev.get("priority", 0.0), published=False,
+                   signature=ev.get("signature", {}), why=[f"rejected: {reason}"]))
+
+
+def expire_post(s, post: PostRow, reason: str) -> None:
+    post.status, post.last_error = "expired", reason
 
 
 def last_published_event(s, symbol: str, event_type: str) -> Optional[EventRow]:
