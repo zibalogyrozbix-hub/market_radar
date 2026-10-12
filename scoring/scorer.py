@@ -16,11 +16,13 @@ def compute_edge(prob_up: Optional[float], baseline: Optional[float], min_edge: 
     """Edge = probability of the favoured side minus that side's historical base rate."""
     if prob_up is None or baseline is None:
         return {"edge": None, "edge_side": None, "baseline_up": baseline, "edge_label": "N/A"}
+    # The reference is max(0.5, base rate of that side): an asset that merely drifted (e.g. 44% up) must not
+    # turn a coin-flip 53% into an "+8.8 pp edge". Also require a real distance from 50%.
     if prob_up >= 0.5:
-        side, edge = "UP", prob_up - baseline
+        side, edge = "UP", prob_up - max(0.5, baseline)
     else:
-        side, edge = "DOWN", (1 - prob_up) - (1 - baseline)
-    label = "CLEAR EDGE" if edge >= min_edge else "NO CLEAR EDGE"
+        side, edge = "DOWN", (1 - prob_up) - max(0.5, 1 - baseline)
+    label = "CLEAR EDGE" if (edge >= min_edge and abs(prob_up - 0.5) >= 0.05) else "NO CLEAR EDGE"
     return {"edge": round(float(edge), 4), "edge_side": side, "baseline_up": round(baseline, 4), "edge_label": label}
 
 
