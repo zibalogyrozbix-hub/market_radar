@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--publish", action="store_true", help="send pending posts")
     g.add_argument("--summary", action="store_true", help="publish the daily summary")
     g.add_argument("--daemon", action="store_true", help="run continuously")
+    g.add_argument("--tune-breakout", action="store_true",
+                   help="backtest BREAKOUT window sizes (20/48/72) on the stored history, print a table")
     g.add_argument("--check-data", action="store_true", help="test data provider and database, then exit")
     g.add_argument("--test-post", nargs="?", const="MARKET_SCAN", metavar="TYPE",
                    help="send ONE sample post now (types: MARKET_SCAN ANOMALY_ALERT HISTORICAL_MATCH REGIME_CHANGE "
@@ -128,6 +130,9 @@ def main(argv=None) -> int:
         ok = pipe.publish_test(args.test_post, symbols[0] if symbols else None, tfs[0] if tfs else None)
         print("test post sent" if ok else "test post NOT sent (see log)")
         return 0 if ok else 1
+    if args.tune_breakout:
+        from tools.tune_breakout import run as _tune
+        return _tune(cfg, pipe, symbols)
     if args.check_data:
         return _check_data(cfg, pipe, db, symbols)
     if args.train:

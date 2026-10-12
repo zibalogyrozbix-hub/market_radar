@@ -76,7 +76,7 @@ class RadarPipeline:
 
         horizon = int(cfg["prediction"]["horizon"])
         thr = float(cfg["prediction"].get("direction_threshold", 0.0))
-        feat = build_features(df)
+        feat = build_features(df, donchian_window=int(cfg.get("regime", {}).get("donchian_window", 20)))
         last = feat.iloc[-1]
         if last[FEATURE_COLUMNS].isna().any():
             log.warning("%s %s skipped: latest features incomplete (%s)", symbol, tf,
