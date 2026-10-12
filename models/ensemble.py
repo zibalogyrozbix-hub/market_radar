@@ -70,6 +70,7 @@ def combine(
 
     probs = dict(parts.get("model_probs") or {})
     probs["similarity"] = parts.get("similarity_up_rate")
+    probs["trend"], probs["momentum"] = src["trend"], src["momentum"]  # price-action sources must agree too
     agreement = model_agreement(probs)
 
     # expected return: blend ML regression and similarity median (weights renormalised)
