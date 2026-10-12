@@ -24,7 +24,7 @@ BASE = {
     "cross_pairs": [{"peer": "EURUSD", "normal_corr": -0.72, "current_corr": -0.21, "corr_change": 0.51, "break": True}],
     "probability_up": 0.74, "probability_down": 0.26, "probability_kind": "calibrated", "expected_return": 0.0028,
     "regime": "EXPANSION", "previous_regime": "RANGE", "regime_changed": True, "risk": "MEDIUM", "risk_score": 40.0,
-    "model_agreement": "HIGH", "market_score": 86.0, "edge": 0.23, "edge_label": "CLEAR EDGE", "model_version": "ML_v001",
+    "model_agreement": "HIGH", "model_skill": 0.05, "market_score": 86.0, "edge": 0.23, "edge_label": "CLEAR EDGE", "model_version": "ML_v001",
     "why": ["Volatility expansion", "Historical similarity"],
 }
 
@@ -224,3 +224,24 @@ def test_scheduler_alignment_and_daemon_loop():
             return True
     sleeps = []
     assert run_daemon(P(), cfg(), max_cycles=3, sleep=sleeps.append, clock=lambda: now) == 3 and len(sleeps) == 2
+
+
+def test_edge_direction_skill_label_and_zero_move():
+    from publishing.post_generator import strip_html
+    down = strip_html(generate_post("MARKET_SCAN", r(probability_up=0.40, edge=0.051, expected_return=-0.000001), cfg()))
+    assert "toward ↓" in down and "≈0.00%" in down and "-0.00%" not in down
+    ns = strip_html(generate_post("MARKET_SCAN", r(model_skill=-0.03), cfg()))
+    assert "no proven skill" in ns and "baseline 🔥" not in ns
+    assert "no proven skill" not in strip_html(generate_post("MARKET_SCAN", BASE, cfg()))
+
+
+def test_weekly_open_quiet_window_and_dst_hours():
+    from utils.market_hours import is_market_open, just_reopened
+    c = cfg()
+    u = lambda *a: datetime(*a, tzinfo=timezone.utc)
+    # October 2026 = US summer time: FX opens Sunday 21:00 UTC
+    assert is_market_open("EURUSD", c, u(2026, 10, 11, 21, 5)) and not is_market_open("EURUSD", c, u(2026, 10, 11, 20, 55))
+    assert just_reopened("EURUSD", c, u(2026, 10, 11, 21), 3) and just_reopened("EURUSD", c, u(2026, 10, 11, 23), 3)
+    assert not just_reopened("EURUSD", c, u(2026, 10, 12, 0), 3) and not just_reopened("BTCUSD", c, u(2026, 10, 11, 21), 3)
+    # January = winter time: opens 22:00 UTC
+    assert not is_market_open("EURUSD", c, u(2026, 1, 11, 21, 30)) and is_market_open("EURUSD", c, u(2026, 1, 11, 22, 5))
