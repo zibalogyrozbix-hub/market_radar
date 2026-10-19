@@ -161,7 +161,7 @@ publishing:
   scheduled_scan_every_minutes: 60
   daily_summary_hour_utc: 20
   max_posts_per_run: 3
-  max_posts_per_day: 12              # channel cap per UTC day (events only)
+  max_posts_per_day: 24              # channel cap per UTC day (events only)
   max_posts_per_symbol_per_day: 3
   max_event_age_minutes: 120         # candle OPEN time + 1h close + 1h grace; older candles are not announced
   pending_max_age_minutes: 120       # undelivered posts older than this are marked expired instead of sent late
