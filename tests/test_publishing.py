@@ -391,3 +391,70 @@ def test_anomaly_second_term_comes_from_another_cluster():
     c = {"anomaly": {"use_isolation_forest": False}}
     assert anomaly_engine.analyze(one_cluster, c)["anomaly_score"] == 70.0
     assert anomaly_engine.analyze(two_cluster, c)["anomaly_score"] == 100.0
+
+
+def test_hours_since_gap_detects_weekend_open_from_data():
+    import pandas as pd
+    from utils.market_hours import hours_since_gap
+    # Friday 18:00..21:00 then Sunday 20:00.. (provider convention differs from our DST clock: data decides)
+    idx = list(pd.date_range("2026-10-16 18:00", periods=4, freq="h", tz="UTC")) + \
+        list(pd.date_range("2026-10-18 20:00", periods=6, freq="h", tz="UTC"))
+    assert hours_since_gap(idx) == 5.0
+    assert hours_since_gap(pd.date_range("2026-10-18 00:00", periods=50, freq="h", tz="UTC")) is None  # BTC-like: no gap
+
+
+def test_true_range_ignores_weekend_gap_but_not_normal_candles():
+    import pandas as pd
+    from features import indicators as ind
+    idx = list(pd.date_range("2026-10-16 20:00", periods=2, freq="h", tz="UTC")) + \
+        list(pd.date_range("2026-10-18 21:00", periods=2, freq="h", tz="UTC"))
+    df = pd.DataFrame({"high": [1.1010, 1.1012, 1.1060, 1.1062], "low": [1.1000, 1.1002, 1.1050, 1.1052],
+                       "close": [1.1005, 1.1008, 1.1055, 1.1058]}, index=idx)
+    tr = ind.true_range(df)
+    assert abs(tr.iloc[2] - 0.0010) < 1e-9            # gap candle: only high-low, not the 0.0050 jump
+    assert abs(tr.iloc[3] - 0.0010) < 1e-9
+    assert ind.true_range(df, gap_hours=0).iloc[2] > 0.004  # old behaviour is still available
+
+
+def test_rolling_and_type_caps_limit_bursts():
+    """A burst of volatility alerts must not use the whole day budget; same-type alerts per run are limited."""
+    import copy
+    from datetime import datetime, timezone
+    from pipeline import RadarPipeline
+    from tests.helpers import cfg as _cfg
+
+    c = copy.deepcopy(_cfg())
+    c["publishing"].update({"max_posts_per_run": 5, "max_posts_per_day": 20, "rolling_window_hours": 6,
+                            "max_posts_per_rolling_window": 6, "max_event_age_minutes": 0,
+                            "max_posts_per_type_per_run": {"VOLATILITY_ALERT": 2}})
+
+    class P(RadarPipeline):
+        def __init__(self):  # no DB / loader needed
+            self.cfg, self.rejected, self.recent = c, [], 5
+
+        def _last_event(self, *a):
+            return None
+
+        def _event_known(self, h):
+            return False
+
+        def _caps_state(self, now, since=None):
+            return {"_total": self.recent if since is not None else 5}
+
+        def _log_rejected(self, ev, reason):
+            self.rejected.append(reason)
+
+    def res(sym):
+        return {"symbol": sym, "timeframe": "H1", "timestamp": datetime.now(timezone.utc).isoformat(), "why": [],
+                "volatility_state": "EXPANSION", "volatility_score": 99, "anomaly_score": 30, "anomaly_detected": False,
+                "similarity_score": 10, "cross_market_score": 0, "market_score": 30, "regime": "EXPANSION",
+                "regime_changed": False, "edge_label": "NO CLEAR EDGE", "probability_up": 0.5}
+
+    p = P()
+    out = p.rank_events([res(s) for s in ("EURUSD", "GBPUSD", "EURGBP")])
+    assert len(out) == 1                                   # rolling window: 6 - 5 already sent = 1 free slot
+    assert any("rolling cap" in r for r in p.rejected)
+    p.recent = 0
+    p.rejected.clear()
+    out = p.rank_events([res(s) for s in ("EURUSD", "GBPUSD", "EURGBP")])
+    assert len(out) == 2 and any("cap per run" in r for r in p.rejected)  # type cap: 2 VOLATILITY_ALERT per run
