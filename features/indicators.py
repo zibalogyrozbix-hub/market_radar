@@ -29,9 +29,20 @@ def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
     return line, sig, line - sig
 
 
-def true_range(df: pd.DataFrame) -> pd.Series:
+GAP_HOURS = 6  # a break longer than this between two candles = weekend / session gap
+
+
+def true_range(df: pd.DataFrame, gap_hours: float = GAP_HOURS) -> pd.Series:
+    """True range. The first candle after a weekend/session gap uses only high-low: the gap to the previous close is
+    not volatility of that hour, and with an EMA of 14 it would otherwise inflate ATR (and every 'volatility
+    expansion' signal) for the next ~14 candles after each weekly open."""
     pc = df["close"].shift(1)
-    return pd.concat([df["high"] - df["low"], (df["high"] - pc).abs(), (df["low"] - pc).abs()], axis=1).max(axis=1)
+    hl = df["high"] - df["low"]
+    tr = pd.concat([hl, (df["high"] - pc).abs(), (df["low"] - pc).abs()], axis=1).max(axis=1)
+    if isinstance(df.index, pd.DatetimeIndex) and gap_hours and gap_hours > 0:
+        gap = df.index.to_series().diff() > pd.Timedelta(hours=gap_hours)
+        tr = tr.where(~gap.to_numpy(), hl)
+    return tr
 
 
 def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
