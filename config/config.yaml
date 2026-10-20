@@ -161,18 +161,23 @@ publishing:
   scheduled_scan_every_minutes: 60
   daily_summary_hour_utc: 20
   max_posts_per_run: 3
-  max_posts_per_day: 24              # channel cap per UTC day (events only)
-  max_posts_per_symbol_per_day: 3
+  max_posts_per_day: 20              # channel cap per UTC day (events only). 0 = unlimited. Telegram itself has no daily limit.
+  max_posts_per_symbol_per_day: 4
+  rolling_window_hours: 6            # a burst (e.g. weekly open) cannot use the whole day budget:
+  max_posts_per_rolling_window: 6    #   at most N event posts in any rolling window of `rolling_window_hours` (0 = off)
+  max_posts_per_type_per_run:        # the same market-wide story is not posted for every pair in one run
+    VOLATILITY_ALERT: 2
+    REGIME_CHANGE: 2
   max_event_age_minutes: 120         # candle OPEN time + 1h close + 1h grace; older candles are not announced
   pending_max_age_minutes: 120       # undelivered posts older than this are marked expired instead of sent late
   send_images: true
   cooldown_minutes:
     MARKET_SCAN: 180
-    ANOMALY_ALERT: 60
+    ANOMALY_ALERT: 120
     HISTORICAL_MATCH: 120
-    REGIME_CHANGE: 120
+    REGIME_CHANGE: 240
     CROSS_MARKET_BREAK: 120
-    VOLATILITY_ALERT: 90
+    VOLATILITY_ALERT: 360
     DAILY_MARKET_SUMMARY: 1200
     MODEL_UPDATE: 600
   disclaimer: "Statistical analysis · not financial advice"
