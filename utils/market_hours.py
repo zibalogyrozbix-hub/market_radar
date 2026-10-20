@@ -53,6 +53,24 @@ def just_reopened(symbol: str, cfg: dict, ts: datetime, hours: float = 3) -> boo
     return timedelta(0) <= ts - open_at < timedelta(hours=hours)
 
 
+def hours_since_gap(index, min_gap_hours: float = 6, lookback: int = 200) -> Optional[float]:
+    """Hours between the first candle after the latest gap (> `min_gap_hours`) and the newest candle, or None when
+    there was no gap in the last `lookback` candles. Data-driven, so it does not depend on the provider's weekly-open
+    convention or on DST rules (unlike `just_reopened`)."""
+    try:
+        import pandas as pd
+        idx = pd.DatetimeIndex(index)[-lookback:]
+        if len(idx) < 2:
+            return None
+        gaps = (idx[1:] - idx[:-1]) > pd.Timedelta(hours=min_gap_hours)
+        if not gaps.any():
+            return None
+        first_after = idx[1:][gaps][-1]
+        return float((idx[-1] - first_after) / pd.Timedelta(hours=1))
+    except Exception:
+        return None
+
+
 def is_market_open(symbol: str, cfg: dict, now: Optional[datetime] = None) -> bool:
     now = now or datetime.now(timezone.utc)
     mh = cfg.get("market_hours", {}) or {}
