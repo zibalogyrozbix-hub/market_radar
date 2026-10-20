@@ -27,6 +27,7 @@ from scoring import scorer
 from training.model_registry import ModelRegistry
 from training.train import load_or_train, train_symbol
 from utils.logging_setup import get_logger
+from utils.market_hours import hours_since_gap
 from utils.schema import finalize_result
 
 log = get_logger("pipeline")
@@ -132,7 +133,8 @@ class RadarPipeline:
         ts = feat.index[-1]
         result = {
             "symbol": symbol, "timeframe": tf, "timestamp": ts.isoformat(), "price": float(last["close"]),
-            "horizon": horizon, "has_volume": bool(feat["tick_volume"].tail(100).fillna(0).sum() > 0),
+            "horizon": horizon, "hours_since_gap": hours_since_gap(feat.index),
+            "has_volume": bool(feat["tick_volume"].tail(100).fillna(0).sum() > 0),
             "trend_score": trend.get("trend_score"), "trend_direction": trend.get("trend_direction"),
             "momentum_score": mom.get("momentum_score"), "momentum_direction": mom.get("momentum_direction"),
             "volatility_score": vol.get("volatility_score"), "volatility_state": vol.get("volatility_state"),
@@ -296,13 +298,13 @@ class RadarPipeline:
         except Exception:
             return False
 
-    def _caps_state(self, now) -> Dict[str, int]:
-        """Events already published today (UTC), from the DB; in-process counter when there is no DB."""
+    def _caps_state(self, now, since=None) -> Dict[str, int]:
+        """Events already published since `since` (default: today 00:00 UTC), from the DB; no DB => zero counts."""
         if self.db is not None:
             try:
                 from database import repository as repo
                 with self.db.session() as s:
-                    return repo.published_event_counts_since(s, now.replace(hour=0, minute=0, second=0, microsecond=0))
+                    return repo.published_event_counts_since(s, since or now.replace(hour=0, minute=0, second=0, microsecond=0))
             except Exception as exc:
                 log.debug("caps lookup failed: %s", exc)
         return {"_total": 0}
@@ -328,8 +330,10 @@ class RadarPipeline:
             try:
                 from utils.market_hours import just_reopened
                 ts = datetime.fromisoformat(r["timestamp"])
-                if just_reopened(r["symbol"], self.cfg, ts, float(pcfg.get("quiet_after_open_hours", 3))):
-                    log.info("%s: first candles after the weekly open - no event posts", r["symbol"])
+                quiet_h = float(pcfg.get("quiet_after_open_hours", 3))
+                hsg = r.get("hours_since_gap")  # data-driven: hours since the first candle after a weekend/session gap
+                if just_reopened(r["symbol"], self.cfg, ts, quiet_h) or (quiet_h > 0 and hsg is not None and hsg < quiet_h):
+                    log.info("%s: first candles after the weekly open/gap - no event posts", r["symbol"])
                     continue
                 age_min = (now - (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc))).total_seconds() / 60
                 if max_age > 0 and age_min > max_age:
@@ -350,19 +354,28 @@ class RadarPipeline:
                 if r["symbol"] not in best or ev["priority"] > best[r["symbol"]]["priority"]:
                     best[r["symbol"]] = ev
         ranked = sorted(best.values(), key=lambda e: -e["priority"])
-        # daily channel caps (UTC day): total and per symbol
-        day_cap, sym_cap = int(pcfg.get("max_posts_per_day", 12)), int(pcfg.get("max_posts_per_symbol_per_day", 3))
+        # channel caps: per UTC day, per rolling window (so a night burst cannot eat the whole day), per symbol, per type
+        day_cap, sym_cap = int(pcfg.get("max_posts_per_day", 20)), int(pcfg.get("max_posts_per_symbol_per_day", 4))
+        win_h, win_cap = float(pcfg.get("rolling_window_hours", 6)), int(pcfg.get("max_posts_per_rolling_window", 6))
+        type_caps = pcfg.get("max_posts_per_type_per_run") or {}
         used = self._caps_state(now)
+        used_win = self._caps_state(now, since=now - timedelta(hours=win_h)) if win_cap > 0 and win_h > 0 else {"_total": 0}
         out: List[Dict[str, Any]] = []
+        by_type: Dict[str, int] = {}
         for ev in ranked:
             if len(out) >= int(pcfg.get("max_posts_per_run", 3)):
                 self._log_rejected(ev, "per-run cap")
             elif day_cap > 0 and used.get("_total", 0) + len(out) >= day_cap:
                 self._log_rejected(ev, f"daily channel cap ({day_cap})")
+            elif win_cap > 0 and used_win.get("_total", 0) + len(out) >= win_cap:
+                self._log_rejected(ev, f"rolling cap ({win_cap} per {win_h:g}h)")
             elif sym_cap > 0 and used.get(ev["symbol"], 0) >= sym_cap:
                 self._log_rejected(ev, f"daily cap for {ev['symbol']} ({sym_cap})")
+            elif type_caps.get(ev["type"]) and by_type.get(ev["type"], 0) >= int(type_caps[ev["type"]]):
+                self._log_rejected(ev, f"{ev['type']} cap per run ({type_caps[ev['type']]})")
             else:
                 out.append(ev)
+                by_type[ev["type"]] = by_type.get(ev["type"], 0) + 1
         return out
 
     def publish_events(self, results: List[Dict[str, Any]]) -> int:
